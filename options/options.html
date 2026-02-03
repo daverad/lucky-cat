@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lucky Cat Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="header-title">
+        <span class="logo">🐱</span>
+        <h1>Lucky Cat Settings</h1>
+      </div>
+      <p class="header-subtitle">Revenue forecasting for RevenueCat</p>
+    </header>
+
+    <main class="main">
+      <!-- Forecasting Section -->
+      <section class="section">
+        <div class="section-header">
+          <span class="section-icon">📊</span>
+          <h2>Forecasting</h2>
+        </div>
+        <div class="section-content">
+          <label class="checkbox-row">
+            <input type="checkbox" id="forecastingEnabled" checked>
+            <span class="checkbox-label">Enable revenue forecasting</span>
+          </label>
+
+          <div class="form-group">
+            <label class="label" for="confidenceRange">Confidence range</label>
+            <select id="confidenceRange" class="select">
+              <option value="conservative">Conservative (wider range)</option>
+              <option value="standard" selected>Standard</option>
+              <option value="aggressive">Aggressive (narrower range)</option>
+            </select>
+            <p class="help-text">Controls the width of the forecast confidence intervals</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ASA Integration Section -->
+      <section class="section">
+        <div class="section-header">
+          <span class="section-icon">🍎</span>
+          <h2>Apple Search Ads Integration</h2>
+          <span class="badge">Optional</span>
+        </div>
+        <div class="section-content">
+          <label class="checkbox-row">
+            <input type="checkbox" id="asaEnabled">
+            <span class="checkbox-label">Enable ASA integration</span>
+          </label>
+
+          <div id="asaCredentials" class="credentials-form">
+            <div class="form-group">
+              <label class="label" for="asaClientId">Client ID</label>
+              <input type="text" id="asaClientId" class="input" placeholder="SEARCHADS.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+            </div>
+
+            <div class="form-group">
+              <label class="label" for="asaClientSecret">Client Secret</label>
+              <input type="password" id="asaClientSecret" class="input" placeholder="Your client secret">
+              <button type="button" id="toggleSecret" class="toggle-visibility">Show</button>
+            </div>
+
+            <div class="form-group">
+              <label class="label" for="asaOrgId">Organization ID</label>
+              <input type="text" id="asaOrgId" class="input" placeholder="1234567">
+            </div>
+
+            <div class="button-row">
+              <button type="button" id="testConnection" class="button button-secondary">
+                Test Connection
+              </button>
+              <span id="connectionStatus" class="connection-status"></span>
+            </div>
+
+            <div class="help-box">
+              <span class="help-icon">ℹ️</span>
+              <p>Get your credentials from <a href="https://searchads.apple.com" target="_blank">Apple Search Ads</a> → Account Settings → API</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Data Section -->
+      <section class="section">
+        <div class="section-header">
+          <span class="section-icon">💾</span>
+          <h2>Data</h2>
+        </div>
+        <div class="section-content">
+          <div class="form-group">
+            <label class="label" for="cacheDuration">Cache duration</label>
+            <select id="cacheDuration" class="select">
+              <option value="3600000">1 hour</option>
+              <option value="21600000">6 hours</option>
+              <option value="43200000">12 hours</option>
+              <option value="86400000" selected>24 hours</option>
+              <option value="604800000">7 days</option>
+            </select>
+          </div>
+
+          <div class="button-row">
+            <button type="button" id="clearCache" class="button button-secondary">
+              Clear cached data
+            </button>
+            <span id="cacheStatus" class="cache-status"></span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <button type="button" id="saveSettings" class="button button-primary">
+        Save Settings
+      </button>
+      <span id="saveStatus" class="save-status"></span>
+    </footer>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

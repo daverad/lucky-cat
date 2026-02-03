@@ -1,0 +1,590 @@
+/**
+ * Lucky Cat - RevenueCat Enhancement Extension
+ * Styles designed to match RevenueCat's native design system
+ */
+
+/* ============================================
+   CSS Variables (RevenueCat Design Tokens)
+   ============================================ */
+
+:root {
+  /* Colors - observed from RevenueCat UI (Light Mode) */
+  --lc-primary: #6366F1;
+  --lc-primary-light: #818CF8;
+  --lc-primary-dark: #4F46E5;
+
+  --lc-bg-primary: #FFFFFF;
+  --lc-bg-secondary: #F9FAFB;
+  --lc-bg-tertiary: #F3F4F6;
+
+  --lc-text-primary: #111827;
+  --lc-text-secondary: #6B7280;
+  --lc-text-tertiary: #9CA3AF;
+
+  --lc-border: #E5E7EB;
+  --lc-border-light: #F3F4F6;
+
+  --lc-success: #10B981;
+  --lc-success-bg: #D1FAE5;
+  --lc-warning: #F59E0B;
+  --lc-warning-bg: #FEF3C7;
+  --lc-error: #EF4444;
+  --lc-error-bg: #FEE2E2;
+
+  /* Typography */
+  --lc-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --lc-font-size-xs: 12px;
+  --lc-font-size-sm: 14px;
+  --lc-font-size-base: 16px;
+  --lc-font-size-lg: 18px;
+  --lc-font-size-xl: 20px;
+  --lc-font-size-2xl: 24px;
+  --lc-font-size-3xl: 30px;
+
+  /* Spacing */
+  --lc-spacing-xs: 4px;
+  --lc-spacing-sm: 8px;
+  --lc-spacing-md: 16px;
+  --lc-spacing-lg: 24px;
+  --lc-spacing-xl: 32px;
+
+  /* Border Radius */
+  --lc-radius-sm: 4px;
+  --lc-radius-md: 8px;
+  --lc-radius-lg: 12px;
+
+  /* Shadows */
+  --lc-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --lc-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --lc-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+
+  /* Transitions */
+  --lc-transition-fast: 150ms ease;
+  --lc-transition-normal: 200ms ease;
+}
+
+/* Dark Mode - follows system preference */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --lc-bg-primary: #1F2937;
+    --lc-bg-secondary: #111827;
+    --lc-bg-tertiary: #374151;
+
+    --lc-text-primary: #F9FAFB;
+    --lc-text-secondary: #D1D5DB;
+    --lc-text-tertiary: #9CA3AF;
+
+    --lc-border: #374151;
+    --lc-border-light: #4B5563;
+
+    --lc-success-bg: rgba(16, 185, 129, 0.2);
+    --lc-warning-bg: rgba(245, 158, 11, 0.2);
+    --lc-error-bg: rgba(239, 68, 68, 0.2);
+
+    --lc-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+    --lc-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+    --lc-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+  }
+}
+
+
+/* ============================================
+   Card Component
+   ============================================ */
+
+.lc-card {
+  background: var(--lc-bg-primary);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-lg);
+  padding: var(--lc-spacing-lg);
+  box-shadow: var(--lc-shadow-sm);
+  font-family: var(--lc-font-family);
+}
+
+.lc-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--lc-spacing-md);
+  padding-bottom: var(--lc-spacing-md);
+  border-bottom: 1px solid var(--lc-border-light);
+}
+
+.lc-card-title {
+  font-size: var(--lc-font-size-sm);
+  font-weight: 600;
+  color: var(--lc-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: var(--lc-spacing-sm);
+}
+
+
+/* ============================================
+   Forecast Panel (Right Sidebar)
+   ============================================ */
+
+.lc-forecast-panel {
+  position: fixed;
+  top: 80px;
+  right: 0;
+  width: 340px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  z-index: 9999;
+  opacity: 0;
+  transform: translateX(100%);
+  transition: opacity var(--lc-transition-normal), transform var(--lc-transition-normal);
+}
+
+.lc-forecast-panel.lc-panel--visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* Responsive: collapse to narrower on smaller screens */
+@media (max-width: 1400px) {
+  .lc-forecast-panel {
+    width: 300px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .lc-forecast-panel {
+    width: 280px;
+    top: 70px;
+  }
+}
+
+.lc-forecast-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--lc-spacing-lg);
+}
+
+@media (max-width: 900px) {
+  .lc-forecast-grid {
+    grid-template-columns: 1fr;
+    gap: var(--lc-spacing-md);
+  }
+}
+
+.lc-forecast-item {
+  padding: var(--lc-spacing-md);
+  background: var(--lc-bg-secondary);
+  border-radius: var(--lc-radius-md);
+}
+
+
+/* ============================================
+   Metrics Display
+   ============================================ */
+
+.lc-metric {
+  font-size: var(--lc-font-size-2xl);
+  font-weight: 700;
+  color: var(--lc-text-primary);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.lc-metric--large {
+  font-size: var(--lc-font-size-3xl);
+}
+
+.lc-metric-label {
+  font-size: var(--lc-font-size-sm);
+  color: var(--lc-text-secondary);
+  margin-bottom: var(--lc-spacing-xs);
+  font-weight: 500;
+}
+
+.lc-forecast-range {
+  font-size: var(--lc-font-size-xs);
+  color: var(--lc-text-tertiary);
+  margin-top: var(--lc-spacing-sm);
+}
+
+.lc-ytd-comparison {
+  margin-top: var(--lc-spacing-sm);
+}
+
+.lc-text-secondary {
+  font-size: var(--lc-font-size-sm);
+  color: var(--lc-text-secondary);
+}
+
+
+/* ============================================
+   Change Indicators
+   ============================================ */
+
+.lc-change {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--lc-font-size-sm);
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: var(--lc-radius-sm);
+  margin-top: var(--lc-spacing-sm);
+  gap: var(--lc-spacing-xs);
+}
+
+.lc-change--positive {
+  color: var(--lc-success);
+  background: var(--lc-success-bg);
+}
+
+.lc-change--negative {
+  color: var(--lc-error);
+  background: var(--lc-error-bg);
+}
+
+.lc-change--neutral {
+  color: var(--lc-text-secondary);
+  background: var(--lc-bg-tertiary);
+}
+
+
+/* ============================================
+   Badge
+   ============================================ */
+
+.lc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--lc-font-size-xs);
+  color: var(--lc-text-tertiary);
+  background: var(--lc-bg-tertiary);
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-weight: 500;
+}
+
+.lc-badge--primary {
+  color: var(--lc-primary);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+
+/* ============================================
+   Insight Box
+   ============================================ */
+
+.lc-insight {
+  margin-top: var(--lc-spacing-md);
+  padding: var(--lc-spacing-md);
+  background: rgba(99, 102, 241, 0.05);
+  border-radius: var(--lc-radius-md);
+  border-left: 3px solid var(--lc-primary);
+  font-size: var(--lc-font-size-sm);
+  color: var(--lc-text-secondary);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--lc-spacing-sm);
+}
+
+.lc-insight-icon {
+  flex-shrink: 0;
+}
+
+
+/* ============================================
+   Table Column Injection (ASA ROI)
+   ============================================ */
+
+.lc-injected-header,
+.lc-injected-column {
+  font-variant-numeric: tabular-nums;
+  text-align: right !important;
+  padding-right: var(--lc-spacing-md) !important;
+}
+
+.lc-injected-header {
+  font-size: var(--lc-font-size-xs);
+  font-weight: 600;
+  color: var(--lc-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.lc-roi-good {
+  color: var(--lc-success);
+  font-weight: 600;
+}
+
+.lc-roi-okay {
+  color: var(--lc-warning);
+  font-weight: 600;
+}
+
+.lc-roi-bad {
+  color: var(--lc-error);
+  font-weight: 600;
+}
+
+
+/* ============================================
+   Progress Bar
+   ============================================ */
+
+.lc-progress-container {
+  width: 100%;
+  margin-top: var(--lc-spacing-sm);
+}
+
+.lc-progress-bar {
+  height: 8px;
+  background: var(--lc-bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.lc-progress-fill {
+  height: 100%;
+  background: var(--lc-primary);
+  border-radius: 4px;
+  transition: width var(--lc-transition-normal);
+}
+
+.lc-progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--lc-font-size-xs);
+  color: var(--lc-text-tertiary);
+  margin-top: var(--lc-spacing-xs);
+}
+
+
+/* ============================================
+   Loading States
+   ============================================ */
+
+.lc-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--lc-spacing-xl);
+  color: var(--lc-text-tertiary);
+}
+
+.lc-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--lc-border);
+  border-top-color: var(--lc-primary);
+  border-radius: 50%;
+  animation: lc-spin 0.8s linear infinite;
+  margin-right: var(--lc-spacing-sm);
+}
+
+@keyframes lc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
+/* ============================================
+   Error States
+   ============================================ */
+
+.lc-error-message {
+  padding: var(--lc-spacing-md);
+  background: var(--lc-error-bg);
+  color: var(--lc-error);
+  border-radius: var(--lc-radius-md);
+  font-size: var(--lc-font-size-sm);
+}
+
+
+/* ============================================
+   Buttons
+   ============================================ */
+
+.lc-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--lc-spacing-sm);
+  padding: var(--lc-spacing-sm) var(--lc-spacing-md);
+  font-size: var(--lc-font-size-sm);
+  font-weight: 500;
+  font-family: var(--lc-font-family);
+  border-radius: var(--lc-radius-md);
+  border: none;
+  cursor: pointer;
+  transition: all var(--lc-transition-fast);
+}
+
+.lc-button--primary {
+  background: var(--lc-primary);
+  color: white;
+}
+
+.lc-button--primary:hover {
+  background: var(--lc-primary-dark);
+}
+
+.lc-button--secondary {
+  background: var(--lc-bg-secondary);
+  color: var(--lc-text-primary);
+  border: 1px solid var(--lc-border);
+}
+
+.lc-button--secondary:hover {
+  background: var(--lc-bg-tertiary);
+}
+
+.lc-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+
+/* ============================================
+   Form Elements
+   ============================================ */
+
+.lc-input {
+  width: 100%;
+  padding: var(--lc-spacing-sm) var(--lc-spacing-md);
+  font-size: var(--lc-font-size-sm);
+  font-family: var(--lc-font-family);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-md);
+  background: var(--lc-bg-primary);
+  color: var(--lc-text-primary);
+  transition: border-color var(--lc-transition-fast), box-shadow var(--lc-transition-fast);
+}
+
+.lc-input:focus {
+  outline: none;
+  border-color: var(--lc-primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.lc-input::placeholder {
+  color: var(--lc-text-tertiary);
+}
+
+.lc-label {
+  display: block;
+  font-size: var(--lc-font-size-sm);
+  font-weight: 500;
+  color: var(--lc-text-primary);
+  margin-bottom: var(--lc-spacing-xs);
+}
+
+.lc-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-spacing-sm);
+  font-size: var(--lc-font-size-sm);
+  color: var(--lc-text-primary);
+  cursor: pointer;
+}
+
+.lc-select {
+  width: 100%;
+  padding: var(--lc-spacing-sm) var(--lc-spacing-md);
+  font-size: var(--lc-font-size-sm);
+  font-family: var(--lc-font-family);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-md);
+  background: var(--lc-bg-primary);
+  color: var(--lc-text-primary);
+  cursor: pointer;
+}
+
+
+/* ============================================
+   Tooltips
+   ============================================ */
+
+.lc-tooltip {
+  position: relative;
+}
+
+.lc-tooltip-content {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--lc-spacing-sm) var(--lc-spacing-md);
+  background: var(--lc-text-primary);
+  color: white;
+  font-size: var(--lc-font-size-xs);
+  border-radius: var(--lc-radius-sm);
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--lc-transition-fast), visibility var(--lc-transition-fast);
+  z-index: 1000;
+  margin-bottom: var(--lc-spacing-xs);
+}
+
+.lc-tooltip:hover .lc-tooltip-content {
+  opacity: 1;
+  visibility: visible;
+}
+
+
+/* ============================================
+   Utility Classes
+   ============================================ */
+
+.lc-hidden {
+  display: none !important;
+}
+
+.lc-text-center {
+  text-align: center;
+}
+
+.lc-text-right {
+  text-align: right;
+}
+
+.lc-mt-sm {
+  margin-top: var(--lc-spacing-sm);
+}
+
+.lc-mt-md {
+  margin-top: var(--lc-spacing-md);
+}
+
+.lc-mb-sm {
+  margin-bottom: var(--lc-spacing-sm);
+}
+
+.lc-mb-md {
+  margin-bottom: var(--lc-spacing-md);
+}
+
+.lc-flex {
+  display: flex;
+}
+
+.lc-flex-col {
+  flex-direction: column;
+}
+
+.lc-items-center {
+  align-items: center;
+}
+
+.lc-justify-between {
+  justify-content: space-between;
+}
+
+.lc-gap-sm {
+  gap: var(--lc-spacing-sm);
+}
+
+.lc-gap-md {
+  gap: var(--lc-spacing-md);
+}

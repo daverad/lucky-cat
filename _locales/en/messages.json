@@ -1,0 +1,10 @@
+{
+  "extensionName": {
+    "message": "Lucky Cat",
+    "description": "The name of the extension"
+  },
+  "extensionDescription": {
+    "message": "Revenue forecasting and Apple Search Ads ROI tracking for RevenueCat",
+    "description": "The description of the extension"
+  }
+}

@@ -1,0 +1,357 @@
+/**
+ * Lucky Cat - Popup Styles
+ */
+
+:root {
+  --lc-primary: #6366F1;
+  --lc-primary-light: #818CF8;
+  --lc-primary-dark: #4F46E5;
+
+  --lc-bg-primary: #FFFFFF;
+  --lc-bg-secondary: #F9FAFB;
+  --lc-bg-tertiary: #F3F4F6;
+
+  --lc-text-primary: #111827;
+  --lc-text-secondary: #6B7280;
+  --lc-text-tertiary: #9CA3AF;
+
+  --lc-border: #E5E7EB;
+
+  --lc-success: #10B981;
+  --lc-success-bg: #D1FAE5;
+  --lc-error: #EF4444;
+  --lc-error-bg: #FEE2E2;
+
+  --lc-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--lc-font-family);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--lc-text-primary);
+  background: var(--lc-bg-primary);
+  width: 300px;
+}
+
+.popup {
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--lc-border);
+  background: var(--lc-bg-secondary);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo {
+  font-size: 20px;
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--lc-text-primary);
+}
+
+.icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--lc-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.icon-button:hover {
+  background: var(--lc-bg-tertiary);
+  color: var(--lc-text-primary);
+}
+
+/* Main content */
+.main {
+  flex: 1;
+  padding: 16px;
+}
+
+/* State containers */
+.state-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px 16px;
+  min-height: 120px;
+}
+
+.message {
+  color: var(--lc-text-secondary);
+  margin-bottom: 12px;
+}
+
+.sub-message {
+  font-size: 12px;
+  color: var(--lc-text-tertiary);
+}
+
+/* Spinner */
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--lc-border);
+  border-top-color: var(--lc-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 12px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Buttons */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--lc-font-family);
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.button-primary {
+  background: var(--lc-primary);
+  color: white;
+}
+
+.button-primary:hover {
+  background: var(--lc-primary-dark);
+}
+
+.button-secondary {
+  background: var(--lc-bg-secondary);
+  color: var(--lc-text-primary);
+  border: 1px solid var(--lc-border);
+}
+
+.button-secondary:hover {
+  background: var(--lc-bg-tertiary);
+}
+
+.button-small {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* Forecast section */
+.forecast-section {
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lc-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+
+/* Metric card */
+.metric-card {
+  background: var(--lc-bg-secondary);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.metric-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.metric-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--lc-text-secondary);
+}
+
+/* Progress bar */
+.progress-container {
+  margin-bottom: 8px;
+}
+
+.progress-bar {
+  height: 8px;
+  background: var(--lc-bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--lc-primary);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--lc-text-tertiary);
+}
+
+/* Metric row */
+.metric-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.metric-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--lc-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-suffix {
+  font-size: 12px;
+  color: var(--lc-text-tertiary);
+}
+
+/* Comparison grid */
+.comparison-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.comparison-item {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  background: var(--lc-bg-secondary);
+  border-radius: 6px;
+}
+
+.comparison-label {
+  font-size: 11px;
+  color: var(--lc-text-tertiary);
+  margin-bottom: 2px;
+}
+
+.comparison-value {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.comparison-value.positive {
+  color: var(--lc-success);
+}
+
+.comparison-value.negative {
+  color: var(--lc-error);
+}
+
+/* YTD section */
+.ytd-section {
+  padding-top: 12px;
+  border-top: 1px solid var(--lc-border);
+}
+
+.ytd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ytd-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.ytd-label {
+  font-size: 10px;
+  color: var(--lc-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ytd-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lc-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ytd-secondary {
+  color: var(--lc-text-secondary);
+}
+
+.ytd-change {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.ytd-change.positive {
+  color: var(--lc-success);
+  background: var(--lc-success-bg);
+}
+
+.ytd-change.negative {
+  color: var(--lc-error);
+  background: var(--lc-error-bg);
+}
+
+/* Footer */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--lc-border);
+  background: var(--lc-bg-secondary);
+}
+
+.footer-text {
+  font-size: 11px;
+  color: var(--lc-text-tertiary);
+}

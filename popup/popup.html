@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lucky Cat</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup">
+    <header class="header">
+      <div class="header-left">
+        <span class="logo">🐱</span>
+        <span class="title">Lucky Cat</span>
+      </div>
+      <button id="openSettings" class="icon-button" title="Settings">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="8" cy="8" r="2"/>
+          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M2.93 2.93l1.41 1.41M11.66 11.66l1.41 1.41M2.93 13.07l1.41-1.41M11.66 4.34l1.41-1.41"/>
+        </svg>
+      </button>
+    </header>
+
+    <main id="mainContent" class="main">
+      <!-- Loading state -->
+      <div id="loadingState" class="state-container">
+        <div class="spinner"></div>
+        <p>Loading forecast data...</p>
+      </div>
+
+      <!-- Not on RevenueCat state -->
+      <div id="notOnRCState" class="state-container" style="display: none;">
+        <p class="message">Open RevenueCat to see your forecasts and analytics.</p>
+        <button id="openRevenueCat" class="button button-primary">
+          Open RevenueCat
+        </button>
+      </div>
+
+      <!-- No data state -->
+      <div id="noDataState" class="state-container" style="display: none;">
+        <p class="message">Navigate to the Charts page with Revenue view to see forecasts.</p>
+        <p class="sub-message">Lucky Cat needs at least 30 days of revenue data.</p>
+      </div>
+
+      <!-- Forecast data -->
+      <div id="forecastState" style="display: none;">
+        <section class="forecast-section">
+          <h2 class="section-title">Quick Forecast</h2>
+
+          <div class="metric-card">
+            <div class="metric-header">
+              <span class="metric-label" id="currentMonthLabel">This Month</span>
+            </div>
+            <div class="progress-container">
+              <div class="progress-bar">
+                <div class="progress-fill" id="monthProgress"></div>
+              </div>
+              <div class="progress-labels">
+                <span id="mtdActual">$0</span>
+                <span id="progressPercent">0%</span>
+              </div>
+            </div>
+            <div class="metric-row">
+              <span class="metric-value" id="projectedTotal">$0</span>
+              <span class="metric-suffix">projected</span>
+            </div>
+          </div>
+
+          <div class="comparison-grid">
+            <div class="comparison-item">
+              <span class="comparison-label">vs Last Month</span>
+              <span class="comparison-value" id="vsLastMonth">—</span>
+            </div>
+            <div class="comparison-item">
+              <span class="comparison-label">vs Last Year</span>
+              <span class="comparison-value" id="vsLastYear">—</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="ytd-section">
+          <div class="ytd-row">
+            <div class="ytd-item">
+              <span class="ytd-label" id="ytdCurrentLabel">2024 YTD</span>
+              <span class="ytd-value" id="ytdCurrent">$0</span>
+            </div>
+            <div class="ytd-item">
+              <span class="ytd-label" id="ytdLastYearLabel">2023 YTD</span>
+              <span class="ytd-value ytd-secondary" id="ytdLastYear">$0</span>
+            </div>
+            <div class="ytd-change" id="ytdChange">—</div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <button id="refreshBtn" class="button button-secondary button-small">
+        Refresh
+      </button>
+      <span class="footer-text">Revenue forecasting for RevenueCat</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
