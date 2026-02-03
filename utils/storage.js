@@ -207,35 +207,141 @@ const RCPStorage = {
 
   /**
    * Store historical revenue data for forecasting
+   * This MERGES new data with existing data to build a comprehensive history
    * @param {string} projectId - RevenueCat project ID
    * @param {Array} data - Daily revenue data
+   * @param {string} granularity - Data granularity ('daily', 'weekly', 'monthly')
    * @returns {Promise<void>}
    */
-  async saveRevenueHistory(projectId, data) {
+  async saveRevenueHistory(projectId, data, granularity = 'daily') {
     try {
+      // Get existing history
+      const existingResult = await chrome.storage.local.get(`revenue_history_${projectId}`);
+      const existing = existingResult[`revenue_history_${projectId}`];
+
+      let mergedData = data;
+
+      // If we have existing data with the same granularity, merge it
+      if (existing && existing.data && existing.granularity === granularity) {
+        mergedData = this.mergeRevenueData(existing.data, data);
+        console.log('LC Storage: Merged', existing.data.length, 'existing +', data.length, 'new =', mergedData.length, 'total data points');
+      }
+
       await chrome.storage.local.set({
         [`revenue_history_${projectId}`]: {
-          data,
-          updatedAt: Date.now()
+          data: mergedData,
+          granularity: granularity,
+          updatedAt: Date.now(),
+          dataPoints: mergedData.length
         }
       });
+
+      console.log('LC Storage: Saved', mergedData.length, granularity, 'data points for project', projectId);
     } catch (e) {
       console.error('RCP: Error saving revenue history', e);
     }
   },
 
   /**
+   * Merge two revenue data arrays, keeping the most recent value for each date
+   * @param {Array} existing - Existing data
+   * @param {Array} newData - New data to merge
+   * @returns {Array} Merged data
+   */
+  mergeRevenueData(existing, newData) {
+    // Create a map keyed by date
+    const dataMap = new Map();
+
+    // Add existing data
+    for (const item of existing) {
+      if (item.date) {
+        dataMap.set(item.date, item);
+      }
+    }
+
+    // Add/overwrite with new data (new data takes precedence)
+    for (const item of newData) {
+      if (item.date) {
+        dataMap.set(item.date, item);
+      }
+    }
+
+    // Convert back to array and sort by date
+    const merged = Array.from(dataMap.values());
+    merged.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    return merged;
+  },
+
+  /**
    * Get historical revenue data
    * @param {string} projectId - RevenueCat project ID
-   * @returns {Promise<Array|null>} Revenue data or null
+   * @returns {Promise<Object|null>} Object with data array and metadata, or null
    */
   async getRevenueHistory(projectId) {
     try {
       const result = await chrome.storage.local.get(`revenue_history_${projectId}`);
-      return result[`revenue_history_${projectId}`]?.data || null;
+      const history = result[`revenue_history_${projectId}`];
+
+      if (!history) return null;
+
+      return {
+        data: history.data || [],
+        granularity: history.granularity || 'daily',
+        updatedAt: history.updatedAt,
+        dataPoints: history.dataPoints || history.data?.length || 0
+      };
     } catch (e) {
       console.error('RCP: Error getting revenue history', e);
       return null;
+    }
+  },
+
+  /**
+   * Get just the revenue data array (for backward compatibility)
+   * @param {string} projectId - RevenueCat project ID
+   * @returns {Promise<Array|null>} Revenue data array or null
+   */
+  async getRevenueHistoryData(projectId) {
+    const history = await this.getRevenueHistory(projectId);
+    return history?.data || null;
+  },
+
+  /**
+   * Get statistics about stored historical data
+   * @param {string} projectId - RevenueCat project ID
+   * @returns {Promise<Object|null>} Statistics about the stored data
+   */
+  async getHistoryStats(projectId) {
+    const history = await this.getRevenueHistory(projectId);
+    if (!history || !history.data || history.data.length === 0) {
+      return null;
+    }
+
+    const data = history.data;
+    const dates = data.map(d => new Date(d.date)).sort((a, b) => a - b);
+
+    return {
+      dataPoints: data.length,
+      granularity: history.granularity,
+      oldestDate: dates[0]?.toISOString().split('T')[0],
+      newestDate: dates[dates.length - 1]?.toISOString().split('T')[0],
+      lastUpdated: history.updatedAt ? new Date(history.updatedAt).toLocaleString() : 'Unknown',
+      totalRevenue: data.reduce((sum, d) => sum + (d.revenue || 0), 0)
+    };
+  },
+
+  /**
+   * Clear historical data for a project
+   * @param {string} projectId - RevenueCat project ID
+   * @returns {Promise<void>}
+   */
+  async clearRevenueHistory(projectId) {
+    try {
+      await chrome.storage.local.remove(`revenue_history_${projectId}`);
+      console.log('LC Storage: Cleared history for project', projectId);
+    } catch (e) {
+      console.error('RCP: Error clearing revenue history', e);
     }
   },
 

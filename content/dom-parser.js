@@ -5,6 +5,10 @@
 
 const LCDOMParser = {
   /**
+   * Detected data granularity (daily, weekly, monthly)
+   */
+  detectedGranularity: 'daily',
+  /**
    * Wait for the page to be fully loaded
    * @returns {Promise<void>}
    */
@@ -202,6 +206,7 @@ const LCDOMParser = {
   /**
    * Parse RevenueCat's specific table format
    * Headers are dates, first column is metric name, cells are values
+   * V3 compatible: explicitly looks for "Revenue" row, ignores others like "Ad Impressions"
    * @param {Element} table
    * @returns {Array|null}
    */
@@ -218,31 +223,39 @@ const LCDOMParser = {
     const headerTexts = Array.from(headers).map(h => h.textContent.trim());
     console.log('LC: Table headers:', headerTexts.slice(0, 5));
 
-    // Find the Revenue row - be flexible about matching
+    // Detect data granularity from headers
+    this.detectedGranularity = this.detectGranularity(headerTexts);
+    console.log('LC: Detected data granularity:', this.detectedGranularity);
+
+    // Find the Revenue row - MUST be explicit "Revenue", ignore other rows like "Ad Impressions", "Transactions", etc.
     let revenueRow = null;
+    const rowLabels = []; // Track all row labels for debugging
+
     for (const row of rows) {
       const firstCell = row.querySelector('td');
       if (firstCell) {
         // Get all text content, normalize whitespace
         const cellText = firstCell.textContent.replace(/\s+/g, ' ').trim().toLowerCase();
-        console.log('LC: Checking row with first cell:', cellText);
+        rowLabels.push(cellText);
 
-        if (cellText === 'revenue' || cellText.includes('revenue')) {
+        // Must match "revenue" exactly or start with "revenue" (e.g., "revenue (usd)")
+        // Do NOT match things like "ad impressions", "transactions", etc.
+        if (cellText === 'revenue' ||
+            cellText.startsWith('revenue ') ||
+            cellText.startsWith('revenue(')) {
           revenueRow = row;
-          console.log('LC: ✓ Found revenue row');
+          console.log('LC: ✓ Found Revenue row:', cellText);
           break;
         }
       }
     }
 
-    // If no revenue row found, try the first row (maybe it's the data we want)
-    if (!revenueRow && rows.length > 0) {
-      console.log('LC: No explicit revenue row, trying first row');
-      revenueRow = rows[0];
-    }
+    console.log('LC: All row labels found:', rowLabels);
 
+    // If no revenue row found, DO NOT fall back to first row - that could give us wrong data
     if (!revenueRow) {
-      console.log('LC: No revenue row found in table');
+      console.log('LC: ❌ No explicit Revenue row found. Available rows:', rowLabels.join(', '));
+      console.log('LC: Skipping this table - need explicit Revenue row for V3 compatibility');
       return null;
     }
 
@@ -259,12 +272,55 @@ const LCDOMParser = {
       const revenue = this.parseCurrencyValue(revenueText);
 
       if (date && revenue !== null) {
-        data.push({ date, revenue });
+        data.push({ date, revenue, granularity: this.detectedGranularity });
       }
     }
 
-    console.log('LC: Extracted', data.length, 'data points from table');
+    console.log('LC: Extracted', data.length, 'data points from table (granularity:', this.detectedGranularity, ')');
     return data.length > 0 ? data : null;
+  },
+
+  /**
+   * Detect data granularity from date headers
+   * @param {Array<string>} headers - Array of header texts
+   * @returns {string} 'daily', 'weekly', or 'monthly'
+   */
+  detectGranularity(headers) {
+    // Need at least 2 date headers to determine granularity
+    const dateHeaders = headers.slice(1).filter(h => this.parseRevenueCatDate(h));
+
+    if (dateHeaders.length < 2) {
+      console.log('LC: Not enough date headers to detect granularity');
+      return 'daily'; // Default assumption
+    }
+
+    // Parse first two dates
+    const date1 = new Date(this.parseRevenueCatDate(dateHeaders[0]));
+    const date2 = new Date(this.parseRevenueCatDate(dateHeaders[1]));
+
+    if (isNaN(date1.getTime()) || isNaN(date2.getTime())) {
+      return 'daily';
+    }
+
+    const diffDays = Math.abs((date2 - date1) / (1000 * 60 * 60 * 24));
+
+    console.log('LC: Date diff between first two columns:', diffDays, 'days');
+
+    if (diffDays >= 28 && diffDays <= 31) {
+      return 'monthly';
+    } else if (diffDays >= 6 && diffDays <= 8) {
+      return 'weekly';
+    } else {
+      return 'daily';
+    }
+  },
+
+  /**
+   * Get the detected data granularity
+   * @returns {string}
+   */
+  getGranularity() {
+    return this.detectedGranularity;
   },
 
   /**

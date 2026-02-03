@@ -98,6 +98,19 @@ const LCUIInjector = {
           <span>${forecasts.insight}</span>
         </div>
       ` : ''}
+
+      ${forecasts.granularity === 'monthly' ? `
+        <div class="lc-insight" style="margin-top: 8px; background: rgba(245, 158, 11, 0.1); border-left-color: #F59E0B;">
+          <span class="lc-insight-icon">📊</span>
+          <span>Viewing monthly data. For more accurate forecasts, switch to daily view.</span>
+        </div>
+      ` : ''}
+
+      ${forecasts.note ? `
+        <div class="lc-text-secondary lc-mt-sm" style="font-size: 11px; opacity: 0.7;">
+          ${forecasts.note}
+        </div>
+      ` : ''}
     `;
 
     this.forecastPanel = panel;
@@ -105,7 +118,78 @@ const LCUIInjector = {
   },
 
   /**
-   * Inject the forecast panel into the page
+   * Find the main content container to shift
+   * @returns {Element|null}
+   */
+  findMainContentContainer() {
+    // Try various selectors that might match RevenueCat's main content area
+    const selectors = [
+      'main',
+      '[class*="main-content"]',
+      '[class*="MainContent"]',
+      '[class*="page-content"]',
+      '[class*="PageContent"]',
+      '[class*="content-area"]',
+      '[class*="ContentArea"]',
+      '[role="main"]',
+      '#root > div > div:last-child', // Common React app structure
+      '#__next > div', // Next.js
+      '.app-content',
+      '[class*="AppContent"]'
+    ];
+
+    for (const selector of selectors) {
+      const el = document.querySelector(selector);
+      if (el && el.offsetWidth > 500) { // Make sure it's a substantial container
+        console.log('LC UI: Found main content container with selector:', selector);
+        return el;
+      }
+    }
+
+    // Fallback: find the largest direct child of body that's not our panel
+    const bodyChildren = Array.from(document.body.children).filter(el =>
+      !el.id?.includes('lucky-cat') &&
+      !el.classList?.contains('lc-') &&
+      el.offsetWidth > 500
+    );
+
+    if (bodyChildren.length > 0) {
+      // Sort by width and return the largest
+      bodyChildren.sort((a, b) => b.offsetWidth - a.offsetWidth);
+      console.log('LC UI: Using largest body child as main content');
+      return bodyChildren[0];
+    }
+
+    return null;
+  },
+
+  /**
+   * Shift the main page content to make room for sidebar
+   */
+  shiftPageContent() {
+    const mainContent = this.findMainContentContainer();
+    if (mainContent) {
+      mainContent.classList.add('lc-page-shifted');
+      console.log('LC UI: ✓ Page content shifted');
+      return mainContent;
+    }
+    console.log('LC UI: Could not find main content to shift');
+    return null;
+  },
+
+  /**
+   * Remove the shift from page content
+   */
+  unshiftPageContent() {
+    const shifted = document.querySelector('.lc-page-shifted');
+    if (shifted) {
+      shifted.classList.remove('lc-page-shifted');
+      console.log('LC UI: Page content un-shifted');
+    }
+  },
+
+  /**
+   * Inject the forecast panel into the page (as fixed sidebar on right)
    * @param {Object} forecasts - Forecast data
    * @returns {boolean} Success status
    */
@@ -123,21 +207,15 @@ const LCUIInjector = {
     }
     console.log('LC UI: ✓ Panel created');
 
-    const injectionPoint = LCDOMParser.findInjectionPoint();
-    console.log('LC UI: Injection point:', injectionPoint ? injectionPoint.tagName : 'null');
-    if (!injectionPoint) {
-      console.log('LC UI: ❌ Could not find injection point');
-      return false;
-    }
+    // Shift main content to make room for sidebar
+    this.shiftPageContent();
 
-    console.log('LC UI: Injection point parent:', injectionPoint.parentNode?.tagName);
-
-    // Insert before the injection point
+    // Append to body for fixed positioning (right sidebar)
     try {
-      injectionPoint.parentNode.insertBefore(panel, injectionPoint);
-      console.log('LC UI: ✓ Panel inserted into DOM');
+      document.body.appendChild(panel);
+      console.log('LC UI: ✓ Panel appended to body');
     } catch (e) {
-      console.log('LC UI: ❌ Failed to insert panel:', e.message);
+      console.log('LC UI: ❌ Failed to append panel:', e.message);
       return false;
     }
 
@@ -161,6 +239,8 @@ const LCUIInjector = {
       console.log('LC UI: Removing existing forecast panel');
       existing.remove();
     }
+    // Also un-shift the page content
+    this.unshiftPageContent();
     this.forecastPanel = null;
   },
 
@@ -207,11 +287,8 @@ const LCUIInjector = {
   showLoading() {
     this.removeForecastPanel();
 
-    const injectionPoint = LCDOMParser.findInjectionPoint();
-    if (!injectionPoint) return;
-
     const panel = this.createLoadingPanel();
-    injectionPoint.parentNode.insertBefore(panel, injectionPoint);
+    document.body.appendChild(panel);
 
     requestAnimationFrame(() => {
       panel.classList.add('lc-panel--visible');

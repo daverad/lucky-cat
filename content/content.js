@@ -77,30 +77,61 @@
       // Parse revenue data from the page
       console.log('LC: Parsing revenue data from page...');
       const revenueData = await LCDOMParser.parseRevenueData();
+      const granularity = LCDOMParser.getGranularity();
 
       console.log('LC: Revenue data result:', revenueData ? `${revenueData.length} records` : 'null');
+      console.log('LC: Data granularity:', granularity);
 
       if (revenueData && revenueData.length > 0) {
         console.log('LC: First 3 records:', JSON.stringify(revenueData.slice(0, 3)));
         console.log('LC: Last 3 records:', JSON.stringify(revenueData.slice(-3)));
       }
 
-      if (!revenueData || revenueData.length < 5) {
-        console.log('LC: ❌ Not enough data for forecasting (need 5+ days, got', revenueData?.length || 0, ')');
+      // Get project ID early
+      const projectId = LCDOMParser.getProjectId();
+      console.log('LC: Project ID:', projectId);
+
+      // Try to merge with cached historical data for better forecasts
+      let dataForForecasting = revenueData;
+
+      if (projectId && revenueData && revenueData.length > 0) {
+        // Save current data to build up history over time
+        await RCPStorage.saveRevenueHistory(projectId, revenueData, granularity);
+
+        // Get the full history (which now includes the merged data)
+        const history = await RCPStorage.getRevenueHistory(projectId);
+        if (history && history.data && history.granularity === granularity) {
+          dataForForecasting = history.data;
+          console.log('LC: Using merged historical data:', dataForForecasting.length, 'total records');
+
+          // Log history stats
+          const stats = await RCPStorage.getHistoryStats(projectId);
+          if (stats) {
+            console.log('LC: History stats:', JSON.stringify(stats));
+          }
+        }
+      }
+
+      // Minimum data check
+      const minRequired = granularity === 'monthly' ? 3 : 5;
+      if (!dataForForecasting || dataForForecasting.length < minRequired) {
+        console.log('LC: ❌ Not enough data for forecasting (need', minRequired + '+, got', dataForForecasting?.length || 0, ')');
         LCUIInjector.removeForecastPanel();
         return;
       }
 
       // Warn if less than ideal amount of data
-      if (revenueData.length < 30) {
-        console.log('LC: ⚠️ Limited data available (', revenueData.length, 'days). Forecasts may be less accurate.');
+      const idealAmount = granularity === 'monthly' ? 12 : 30;
+      if (dataForForecasting.length < idealAmount) {
+        console.log('LC: ⚠️ Limited data available (', dataForForecasting.length, 'records). Forecasts may be less accurate.');
+        console.log('LC: 💡 Tip: Visit the "All Time" daily view to build up historical data for better forecasts.');
       }
 
-      console.log('LC: ✓ Found', revenueData.length, 'days of revenue data');
+      console.log('LC: ✓ Found', dataForForecasting.length, granularity, 'data points');
 
-      // Calculate forecasts
+      // Calculate forecasts with granularity awareness
       console.log('LC: Calculating forecasts...');
-      const forecasts = LCForecasting.calculateForecasts(revenueData);
+      const forecasts = LCForecasting.calculateForecasts(dataForForecasting, granularity);
 
       if (!forecasts) {
         console.log('LC: ❌ Could not calculate forecasts');
@@ -111,7 +142,8 @@
       console.log('LC: ✓ Forecasts calculated:', JSON.stringify({
         currentMonth: forecasts.currentMonth?.projected,
         nextMonth: forecasts.nextMonth?.projected,
-        ytd: forecasts.ytd?.current
+        ytd: forecasts.ytd?.current,
+        granularity: forecasts.granularity
       }));
 
       // Find injection point
@@ -126,11 +158,8 @@
       if (success) {
         console.log('LC: ✓ Forecast panel injected successfully!');
 
-        // Store project data for popup access
-        const projectId = LCDOMParser.getProjectId();
-        console.log('LC: Project ID:', projectId);
+        // Cache the forecast for popup access
         if (projectId) {
-          await RCPStorage.saveRevenueHistory(projectId, revenueData);
           await RCPStorage.setCache(`forecast_${projectId}`, forecasts, 5 * 60 * 1000);
         }
       } else {

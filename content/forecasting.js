@@ -5,30 +5,224 @@
 
 const LCForecasting = {
   /**
+   * Current data granularity
+   */
+  granularity: 'daily',
+
+  /**
    * Calculate all forecasts from revenue data
-   * @param {Array} dailyData - Array of {date, revenue} objects
+   * @param {Array} dailyData - Array of {date, revenue, granularity?} objects
+   * @param {string} granularity - Data granularity: 'daily', 'weekly', or 'monthly'
    * @returns {Object} Forecast results
    */
-  calculateForecasts(dailyData) {
-    if (!dailyData || dailyData.length < 5) {
-      console.log('LC Forecasting: Not enough data, need at least 5 days');
+  calculateForecasts(dailyData, granularity = null) {
+    if (!dailyData || dailyData.length < 3) {
+      console.log('LC Forecasting: Not enough data, need at least 3 data points');
       return null;
     }
 
-    console.log('LC Forecasting: Calculating with', dailyData.length, 'days of data');
+    // Detect granularity from data if not provided
+    if (granularity) {
+      this.granularity = granularity;
+    } else if (dailyData[0]?.granularity) {
+      this.granularity = dailyData[0].granularity;
+    } else {
+      this.granularity = this.detectGranularityFromData(dailyData);
+    }
+
+    console.log('LC Forecasting: Calculating with', dailyData.length, 'data points, granularity:', this.granularity);
 
     // Sort data by date
     const sortedData = [...dailyData].sort((a, b) =>
       new Date(a.date) - new Date(b.date)
     );
 
+    // For monthly data, we need different calculations
+    if (this.granularity === 'monthly') {
+      return this.calculateMonthlyForecasts(sortedData);
+    }
+
     return {
       currentMonth: this.forecastCurrentMonth(sortedData),
       nextMonth: this.forecastNextMonth(sortedData),
       ytd: this.calculateYTDComparison(sortedData),
       patterns: this.analyzeDailyPatterns(sortedData),
-      insight: this.generateInsight(sortedData)
+      insight: this.generateInsight(sortedData),
+      granularity: this.granularity
     };
+  },
+
+  /**
+   * Detect granularity from the data itself
+   * @param {Array} data
+   * @returns {string}
+   */
+  detectGranularityFromData(data) {
+    if (data.length < 2) return 'daily';
+
+    const date1 = new Date(data[0].date);
+    const date2 = new Date(data[1].date);
+    const diffDays = Math.abs((date2 - date1) / (1000 * 60 * 60 * 24));
+
+    if (diffDays >= 28) return 'monthly';
+    if (diffDays >= 6) return 'weekly';
+    return 'daily';
+  },
+
+  /**
+   * Calculate forecasts for monthly granularity data
+   * @param {Array} monthlyData
+   * @returns {Object}
+   */
+  calculateMonthlyForecasts(monthlyData) {
+    console.log('LC Forecasting: Using monthly calculation mode');
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const monthName = now.toLocaleDateString('en-US', { month: 'long' });
+
+    // Get the most recent complete months
+    const recentMonths = monthlyData.slice(-12);
+
+    // Find current month's data if available
+    const currentMonthData = monthlyData.find(d => {
+      const date = new Date(d.date);
+      return date.getFullYear() === currentYear && date.getMonth() === currentMonth;
+    });
+
+    // Find same month last year
+    const lastYearSameMonth = monthlyData.find(d => {
+      const date = new Date(d.date);
+      return date.getFullYear() === currentYear - 1 && date.getMonth() === currentMonth;
+    });
+
+    // Calculate average monthly revenue
+    const avgMonthly = this.average(recentMonths.map(d => d.revenue || 0));
+
+    // Project current month (if we have partial data, extrapolate; otherwise use average)
+    let currentMonthProjected = avgMonthly;
+    let mtdActual = 0;
+    let daysRemaining = 0;
+
+    if (currentMonthData) {
+      mtdActual = currentMonthData.revenue;
+      // If it's a partial month, extrapolate
+      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+      const dayOfMonth = now.getDate();
+      daysRemaining = daysInMonth - dayOfMonth;
+
+      if (dayOfMonth < daysInMonth - 5) {
+        // Extrapolate from MTD
+        currentMonthProjected = (mtdActual / dayOfMonth) * daysInMonth;
+      } else {
+        // Close to end of month, use actual
+        currentMonthProjected = mtdActual;
+      }
+    }
+
+    // Calculate YoY change
+    let vsLastYear = null;
+    if (lastYearSameMonth && lastYearSameMonth.revenue > 0) {
+      vsLastYear = ((currentMonthProjected - lastYearSameMonth.revenue) / lastYearSameMonth.revenue) * 100;
+    }
+
+    // Calculate variance for confidence range
+    const variance = this.calculateMonthlyVariance(monthlyData);
+
+    // Next month forecast
+    let nextMonth = now.getMonth() + 1;
+    let nextYear = currentYear;
+    if (nextMonth > 11) {
+      nextMonth = 0;
+      nextYear += 1;
+    }
+    const nextMonthName = new Date(nextYear, nextMonth, 1).toLocaleDateString('en-US', { month: 'long' });
+
+    // Find next month from last year for seasonality
+    const nextMonthLastYear = monthlyData.find(d => {
+      const date = new Date(d.date);
+      return date.getFullYear() === nextYear - 1 && date.getMonth() === nextMonth;
+    });
+
+    let nextMonthProjected = avgMonthly;
+    if (nextMonthLastYear && nextMonthLastYear.revenue > 0) {
+      const yoyGrowth = this.calculateYoYGrowth(monthlyData);
+      nextMonthProjected = nextMonthLastYear.revenue * yoyGrowth;
+    }
+
+    // YTD calculation
+    const ytdCurrent = monthlyData
+      .filter(d => {
+        const date = new Date(d.date);
+        return date.getFullYear() === currentYear;
+      })
+      .reduce((sum, d) => sum + (d.revenue || 0), 0);
+
+    const ytdLastYear = monthlyData
+      .filter(d => {
+        const date = new Date(d.date);
+        return date.getFullYear() === currentYear - 1 && date.getMonth() <= currentMonth;
+      })
+      .reduce((sum, d) => sum + (d.revenue || 0), 0);
+
+    let ytdPctChange = null;
+    if (ytdLastYear > 0) {
+      ytdPctChange = ((ytdCurrent - ytdLastYear) / ytdLastYear) * 100;
+    }
+
+    return {
+      currentMonth: {
+        name: monthName,
+        projected: Math.round(currentMonthProjected),
+        low: Math.round(currentMonthProjected * (1 - variance)),
+        high: Math.round(currentMonthProjected * (1 + variance)),
+        mtdActual: Math.round(mtdActual),
+        daysRemaining: daysRemaining,
+        vsLastYear: vsLastYear,
+        confidence: daysRemaining < 10 ? 'high' : 'medium'
+      },
+      nextMonth: {
+        name: nextMonthName,
+        year: nextYear,
+        projected: Math.round(nextMonthProjected),
+        low: Math.round(nextMonthProjected * (1 - variance * 1.5)),
+        high: Math.round(nextMonthProjected * (1 + variance * 1.5)),
+        basedOn: nextMonthLastYear ? `${nextMonthName} ${nextYear - 1}` : 'Recent average',
+        confidence: 'lower'
+      },
+      ytd: {
+        current: Math.round(ytdCurrent),
+        lastYear: Math.round(ytdLastYear),
+        pctChange: ytdPctChange !== null ? Math.round(ytdPctChange * 10) / 10 : null,
+        asOf: now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        currentYear: currentYear,
+        lastYearLabel: currentYear - 1
+      },
+      patterns: null, // Daily patterns don't apply to monthly data
+      insight: this.generateMonthlyInsight(monthlyData),
+      granularity: 'monthly',
+      note: 'Forecasts based on monthly data. For more accurate daily forecasts, view the daily chart.'
+    };
+  },
+
+  /**
+   * Generate insight for monthly data
+   */
+  generateMonthlyInsight(monthlyData) {
+    if (monthlyData.length < 3) return null;
+
+    const recent = monthlyData.slice(-3);
+    const trend = recent[2]?.revenue > recent[0]?.revenue ? 'up' : 'down';
+    const trendPct = recent[0]?.revenue > 0
+      ? Math.abs(((recent[2]?.revenue - recent[0]?.revenue) / recent[0]?.revenue) * 100)
+      : 0;
+
+    if (trendPct > 10) {
+      return `Revenue trending ${trend} ${trendPct.toFixed(0)}% over the last 3 months`;
+    }
+
+    return null;
   },
 
   /**

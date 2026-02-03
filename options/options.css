@@ -26,6 +26,25 @@
   --lc-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* Dark Mode - follows system preference */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --lc-bg-primary: #1F2937;
+    --lc-bg-secondary: #111827;
+    --lc-bg-tertiary: #374151;
+
+    --lc-text-primary: #F9FAFB;
+    --lc-text-secondary: #D1D5DB;
+    --lc-text-tertiary: #9CA3AF;
+
+    --lc-border: #374151;
+    --lc-border-light: #4B5563;
+
+    --lc-success-bg: rgba(16, 185, 129, 0.2);
+    --lc-error-bg: rgba(239, 68, 68, 0.2);
+  }
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -305,7 +324,7 @@ body {
   gap: 8px;
   margin-top: 16px;
   padding: 12px;
-  background: rgba(99, 102, 241, 0.05);
+  background: rgba(99, 102, 241, 0.1);
   border-radius: 8px;
   border-left: 3px solid var(--lc-primary);
 }

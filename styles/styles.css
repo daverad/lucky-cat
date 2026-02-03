@@ -129,8 +129,8 @@
 .lc-forecast-panel {
   position: fixed;
   top: 80px;
-  right: 0;
-  width: 340px;
+  right: 16px;
+  width: 320px;
   max-height: calc(100vh - 100px);
   overflow-y: auto;
   z-index: 9999;
@@ -144,31 +144,38 @@
   transform: translateX(0);
 }
 
+/* Push main content to the left when panel is visible */
+.lc-page-shifted {
+  margin-right: 350px !important;
+  transition: margin-right 0.2s ease;
+}
+
 /* Responsive: collapse to narrower on smaller screens */
 @media (max-width: 1400px) {
   .lc-forecast-panel {
-    width: 300px;
+    width: 280px;
+    right: 12px;
+  }
+  .lc-page-shifted {
+    margin-right: 310px !important;
   }
 }
 
 @media (max-width: 1200px) {
   .lc-forecast-panel {
-    width: 280px;
+    width: 260px;
     top: 70px;
+    right: 8px;
+  }
+  .lc-page-shifted {
+    margin-right: 280px !important;
   }
 }
 
 .lc-forecast-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--lc-spacing-lg);
-}
-
-@media (max-width: 900px) {
-  .lc-forecast-grid {
-    grid-template-columns: 1fr;
-    gap: var(--lc-spacing-md);
-  }
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-spacing-md);
 }
 
 .lc-forecast-item {
@@ -265,8 +272,8 @@
 }
 
 .lc-badge--primary {
-  color: var(--lc-primary);
-  background: rgba(99, 102, 241, 0.1);
+  color: var(--lc-primary-light);
+  background: rgba(99, 102, 241, 0.15);
 }
 
 
@@ -277,7 +284,7 @@
 .lc-insight {
   margin-top: var(--lc-spacing-md);
   padding: var(--lc-spacing-md);
-  background: rgba(99, 102, 241, 0.05);
+  background: rgba(99, 102, 241, 0.1);
   border-radius: var(--lc-radius-md);
   border-left: 3px solid var(--lc-primary);
   font-size: var(--lc-font-size-sm);
