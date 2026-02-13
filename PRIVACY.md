@@ -64,7 +64,7 @@ If we make changes to this privacy policy, we will update the "Last Updated" dat
 
 ## Contact
 
-For questions about this privacy policy or the extension, please open an issue on our GitHub repository.
+For questions about this privacy policy or the extension, email us at meow@luckycat.tools or open an issue on our GitHub repository.
 
 ## Consent
 

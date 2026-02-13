@@ -22,7 +22,7 @@ When viewing Attribution > Keywords, Lucky Cat can add Spend and ROI columns by 
 2. Open Chrome and go to `chrome://extensions/`
 3. Enable "Developer mode" (toggle in top right)
 4. Click "Load unpacked"
-5. Select the `revenuecat-plus` folder
+5. Select the `lucky-cat` folder
 
 ### From Chrome Web Store
 *(Coming soon)*
@@ -76,7 +76,7 @@ Click the extension icon and then the gear icon to access settings:
 ### Project Structure
 
 ```
-revenuecat-plus/
+lucky-cat/
 ├── manifest.json           # Extension manifest
 ├── background.js           # Service worker for API calls
 ├── content/                # Content scripts
@@ -98,7 +98,13 @@ See `icons/README.md` for instructions on generating PNG icons from the SVG sour
 
 ## License
 
-MIT
+MIT - See [LICENSE](LICENSE)
+
+## Links
+
+- [Privacy Policy](PRIVACY.md)
+- [GitHub Repository](https://github.com/daverad/lucky-cat)
+- Support: meow@luckycat.tools
 
 ## Acknowledgments
 

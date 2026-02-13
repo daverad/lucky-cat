@@ -62,7 +62,7 @@ async function loadData() {
       showState('noData');
     }
   } catch (error) {
-    console.error('Error loading data:', error);
+    // console.error('Error loading data:', error);
 
     // If content script not loaded, show not on RC state
     if (error.message && error.message.includes('Could not establish connection')) {

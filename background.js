@@ -9,6 +9,11 @@
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.type) {
+    case 'OPEN_OPTIONS':
+      chrome.runtime.openOptionsPage();
+      sendResponse({ success: true });
+      break;
+
     case 'FETCH_ASA_DATA':
       handleFetchASAData(request.dateRange, request.keywords)
         .then(data => sendResponse({ success: true, data }))
@@ -79,8 +84,6 @@ async function handleFetchASAData(dateRange, keywords) {
   );
 
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error('ASA API Error:', response.status, errorText);
     throw new Error(`ASA API error: ${response.status}`);
   }
 
@@ -175,8 +178,6 @@ async function getASAAccessToken(credentials) {
   );
 
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error('Token request failed:', response.status, errorText);
     throw new Error('Failed to get ASA access token');
   }
 
@@ -240,30 +241,34 @@ async function getASACredentials() {
  */
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
-    console.log('Lucky Cat installed!');
-
     // Set default settings
     chrome.storage.local.set({
       settings: {
-        forecastingEnabled: true,
         asaEnabled: false,
         confidenceRange: 'standard',
-        cacheDuration: 24 * 60 * 60 * 1000
+        cacheDuration: 12 * 60 * 60 * 1000 // 12 hours
       }
     });
-  } else if (details.reason === 'update') {
-    console.log('Lucky Cat updated to version', chrome.runtime.getManifest().version);
   }
 });
 
 /**
- * Handle extension icon click when not on RevenueCat
+ * Handle extension icon click - toggle the sidebar or navigate to revenue chart
  */
 chrome.action.onClicked.addListener((tab) => {
-  // If popup is configured, this won't fire
-  // This is a fallback if popup fails to load
-  if (!tab.url.includes('app.revenuecat.com')) {
-    chrome.tabs.create({ url: 'https://app.revenuecat.com' });
+  // All-time daily revenue chart URL
+  const revenueChartUrl = 'https://app.revenuecat.com/charts/revenue?range=All+time&resolution=0&chart_type=Stacked+area';
+
+  if (tab.url && tab.url.includes('app.revenuecat.com')) {
+    // On RevenueCat - send message to toggle sidebar
+    chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_SIDEBAR' })
+      .catch(() => {
+        // If content script not loaded, navigate to revenue chart
+        chrome.tabs.update(tab.id, { url: revenueChartUrl });
+      });
+  } else {
+    // Not on RevenueCat - open revenue chart directly
+    chrome.tabs.create({ url: revenueChartUrl });
   }
 });
 
@@ -296,8 +301,5 @@ async function clearExpiredCache() {
 
   if (keysToRemove.length > 0) {
     await chrome.storage.local.remove(keysToRemove);
-    console.log('LC: Cleared', keysToRemove.length, 'expired cache entries');
   }
 }
-
-console.log('Lucky Cat background service worker started');

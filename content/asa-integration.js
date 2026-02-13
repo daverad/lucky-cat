@@ -12,28 +12,28 @@ const LCASAIntegration = {
     // Check if ASA is configured
     const hasCredentials = await RCPStorage.hasASACredentials();
     if (!hasCredentials) {
-      console.log('LC: ASA not configured, skipping integration');
+      // Removed for production('LC: ASA not configured, skipping integration');
       return false;
     }
 
     // Check if enabled in settings
     const settings = await RCPStorage.getSettings();
     if (!settings.asaEnabled) {
-      console.log('LC: ASA integration disabled in settings');
+      // Removed for production('LC: ASA integration disabled in settings');
       return false;
     }
 
     // Find the attribution table
     const table = LCDOMParser.findAttributionTable();
     if (!table) {
-      console.log('LC: Could not find attribution table');
+      // Removed for production('LC: Could not find attribution table');
       return false;
     }
 
     // Get date range from page
     const dateRange = LCDOMParser.getDateRangeFromPage();
     if (!dateRange) {
-      console.log('LC: Could not determine date range');
+      // Removed for production('LC: Could not determine date range');
       // Use last 30 days as fallback
       const now = new Date();
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
@@ -46,7 +46,7 @@ const LCASAIntegration = {
     // Extract keywords from table
     const keywords = LCDOMParser.extractKeywordsFromTable(table);
     if (keywords.length === 0) {
-      console.log('LC: No keywords found in table');
+      // Removed for production('LC: No keywords found in table');
       return false;
     }
 
@@ -55,7 +55,7 @@ const LCASAIntegration = {
       const asaData = await this.fetchASAData(dateRange, keywords.map(k => k.keyword));
 
       if (!asaData || Object.keys(asaData).length === 0) {
-        console.log('LC: No ASA data returned');
+        // Removed for production('LC: No ASA data returned');
         return false;
       }
 
@@ -63,12 +63,12 @@ const LCASAIntegration = {
       const success = LCUIInjector.injectASAColumns(table, asaData);
 
       if (success) {
-        console.log('LC: ASA columns injected successfully');
+        // Removed for production('LC: ASA columns injected successfully');
       }
 
       return success;
     } catch (error) {
-      console.error('LC: Error fetching ASA data', error);
+      // console.error('LC: Error fetching ASA data', error);
       return false;
     }
   },

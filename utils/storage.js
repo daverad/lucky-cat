@@ -10,7 +10,8 @@ const RCPStorage = {
     forecastingEnabled: true,
     asaEnabled: false,
     confidenceRange: 'standard', // 'conservative', 'standard', 'aggressive'
-    cacheDuration: 24 * 60 * 60 * 1000, // 24 hours in ms
+    cacheDuration: 12 * 60 * 60 * 1000, // 12 hours in ms
+    forecastScenario: 'better', // 'good', 'better', or 'best'
   },
 
   /**
@@ -19,10 +20,20 @@ const RCPStorage = {
    */
   async getSettings() {
     try {
+      // Check if extension context is still valid
+      if (!chrome.runtime?.id) {
+        // console.warn('LC: Extension context invalidated - please refresh the page');
+        return this.defaults;
+      }
       const result = await chrome.storage.local.get('settings');
       return { ...this.defaults, ...result.settings };
     } catch (e) {
-      console.error('RCP: Error getting settings', e);
+      // Handle extension context invalidated error gracefully
+      if (e.message?.includes('Extension context invalidated')) {
+        // console.warn('LC: Extension was reloaded - please refresh the page to use Lucky Cat');
+        return this.defaults;
+      }
+      // console.error('RCP: Error getting settings', e);
       return this.defaults;
     }
   },
@@ -39,7 +50,7 @@ const RCPStorage = {
         settings: { ...current, ...settings }
       });
     } catch (e) {
-      console.error('RCP: Error saving settings', e);
+      // console.error('RCP: Error saving settings', e);
       throw e;
     }
   },
@@ -96,7 +107,7 @@ const RCPStorage = {
       // Update settings to enable ASA
       await this.saveSettings({ asaEnabled: true });
     } catch (e) {
-      console.error('RCP: Error saving ASA credentials', e);
+      // console.error('RCP: Error saving ASA credentials', e);
       throw e;
     }
   },
@@ -110,7 +121,7 @@ const RCPStorage = {
       const result = await chrome.storage.local.get('asa_credentials');
       return result.asa_credentials || null;
     } catch (e) {
-      console.error('RCP: Error getting ASA credentials', e);
+      // console.error('RCP: Error getting ASA credentials', e);
       return null;
     }
   },
@@ -133,7 +144,7 @@ const RCPStorage = {
       await chrome.storage.local.remove('asa_credentials');
       await this.saveSettings({ asaEnabled: false });
     } catch (e) {
-      console.error('RCP: Error clearing ASA credentials', e);
+      // console.error('RCP: Error clearing ASA credentials', e);
       throw e;
     }
   },
@@ -158,7 +169,7 @@ const RCPStorage = {
         }
       });
     } catch (e) {
-      console.error('RCP: Error setting cache', e);
+      // console.error('RCP: Error setting cache', e);
     }
   },
 
@@ -182,7 +193,7 @@ const RCPStorage = {
 
       return cached.data;
     } catch (e) {
-      console.error('RCP: Error getting cache', e);
+      // console.error('RCP: Error getting cache', e);
       return null;
     }
   },
@@ -200,7 +211,7 @@ const RCPStorage = {
         await chrome.storage.local.remove(cacheKeys);
       }
     } catch (e) {
-      console.error('RCP: Error clearing cache', e);
+      // console.error('RCP: Error clearing cache', e);
       throw e;
     }
   },
@@ -224,7 +235,7 @@ const RCPStorage = {
       // If we have existing data with the same granularity, merge it
       if (existing && existing.data && existing.granularity === granularity) {
         mergedData = this.mergeRevenueData(existing.data, data);
-        console.log('LC Storage: Merged', existing.data.length, 'existing +', data.length, 'new =', mergedData.length, 'total data points');
+        // Removed for production('LC Storage: Merged', existing.data.length, 'existing +', data.length, 'new =', mergedData.length, 'total data points');
       }
 
       await chrome.storage.local.set({
@@ -236,9 +247,9 @@ const RCPStorage = {
         }
       });
 
-      console.log('LC Storage: Saved', mergedData.length, granularity, 'data points for project', projectId);
+      // Removed for production('LC Storage: Saved', mergedData.length, granularity, 'data points for project', projectId);
     } catch (e) {
-      console.error('RCP: Error saving revenue history', e);
+      // console.error('RCP: Error saving revenue history', e);
     }
   },
 
@@ -292,7 +303,7 @@ const RCPStorage = {
         dataPoints: history.dataPoints || history.data?.length || 0
       };
     } catch (e) {
-      console.error('RCP: Error getting revenue history', e);
+      // console.error('RCP: Error getting revenue history', e);
       return null;
     }
   },
@@ -339,9 +350,9 @@ const RCPStorage = {
   async clearRevenueHistory(projectId) {
     try {
       await chrome.storage.local.remove(`revenue_history_${projectId}`);
-      console.log('LC Storage: Cleared history for project', projectId);
+      // Removed for production('LC Storage: Cleared history for project', projectId);
     } catch (e) {
-      console.error('RCP: Error clearing revenue history', e);
+      // console.error('RCP: Error clearing revenue history', e);
     }
   },
 
@@ -359,6 +370,60 @@ const RCPStorage = {
     };
 
     return multipliers[settings.confidenceRange] || 1.5;
+  },
+
+  /**
+   * Check if revenue history cache is fresh
+   * @param {string} projectId - RevenueCat project ID
+   * @param {number} maxAgeMs - Maximum age in milliseconds (default 12 hours)
+   * @returns {Promise<boolean>} True if cache exists and is fresh
+   */
+  async isRevenueHistoryFresh(projectId, maxAgeMs = 12 * 60 * 60 * 1000) {
+    const history = await this.getRevenueHistory(projectId);
+    if (!history || !history.updatedAt) return false;
+    return (Date.now() - history.updatedAt) < maxAgeMs;
+  },
+
+  /**
+   * Set redirect state for data gathering flow
+   * Uses sessionStorage for per-tab isolation
+   * @param {Object} state - Redirect state object
+   */
+  setRedirectState(state) {
+    sessionStorage.setItem('lc_redirect_state', JSON.stringify({
+      ...state,
+      timestamp: Date.now()
+    }));
+  },
+
+  /**
+   * Get redirect state
+   * @returns {Object|null} Redirect state or null if expired/missing
+   */
+  getRedirectState() {
+    const state = sessionStorage.getItem('lc_redirect_state');
+    if (!state) return null;
+
+    try {
+      const parsed = JSON.parse(state);
+      // Expire after 5 minutes
+      if (Date.now() - parsed.timestamp > 5 * 60 * 1000) {
+        this.clearRedirectState();
+        return null;
+      }
+      return parsed;
+    } catch (e) {
+      // console.error('LC: Error parsing redirect state', e);
+      this.clearRedirectState();
+      return null;
+    }
+  },
+
+  /**
+   * Clear redirect state
+   */
+  clearRedirectState() {
+    sessionStorage.removeItem('lc_redirect_state');
   }
 };
 

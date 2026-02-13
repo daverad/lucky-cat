@@ -6,45 +6,45 @@
 (async function() {
   'use strict';
 
+  // Constants
+  const REVENUE_CHART_URL = 'https://app.revenuecat.com/charts/revenue?range=All+time&resolution=0&chart_type=Stacked+area';
+  const CACHE_FRESHNESS_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+  // Check if extension context is valid (handles reload scenario)
+  if (!chrome.runtime?.id) {
+    return;
+  }
+
   // Prevent multiple initializations
   if (window.__LUCKY_CAT_INITIALIZED__) {
-    console.log('🐱 Lucky Cat already initialized, skipping');
     return;
   }
   window.__LUCKY_CAT_INITIALIZED__ = true;
-
-  console.log('🐱 Lucky Cat initializing...');
-  console.log('🐱 Current URL:', window.location.href);
-  console.log('🐱 Current pathname:', window.location.pathname);
 
   /**
    * Main initialization
    */
   async function init() {
-    console.log('LC: Starting init...');
-
     // Wait for page to fully load
-    console.log('LC: Waiting for page to load...');
     await LCDOMParser.waitForPageLoad();
-    console.log('LC: Page loaded');
+
+    // Check for redirect state first (data gathering flow)
+    const redirectState = RCPStorage.getRedirectState();
+    if (redirectState) {
+      await handleRedirectState(redirectState);
+      return;
+    }
 
     // Get settings
-    console.log('LC: Getting settings...');
     const settings = await RCPStorage.getSettings();
-    console.log('LC: Settings:', JSON.stringify(settings));
 
     // Determine which page we're on
     const pageType = LCDOMParser.detectPageType();
-    console.log('LC: Page type detected:', pageType);
 
     switch (pageType) {
       case 'charts-revenue':
-        console.log('LC: On revenue charts page, forecastingEnabled:', settings.forecastingEnabled);
-        if (settings.forecastingEnabled) {
-          await initForecastingPanel();
-        } else {
-          console.log('LC: Forecasting is disabled in settings');
-        }
+        // Inject Lucky Cat button into header
+        injectHeaderButton();
         break;
 
       case 'attribution-keywords':
@@ -53,163 +53,229 @@
         }
         break;
 
-      case 'overview':
-        console.log('LC: On overview page - no enhancements yet');
-        break;
-
       default:
-        console.log('LC: Unknown page type, no enhancements applied');
+        // Try to inject button on any charts page
+        if (window.location.pathname.includes('/charts')) {
+          injectHeaderButton();
+        }
         break;
     }
   }
 
   /**
-   * Initialize the forecasting panel
+   * Handle redirect state for data gathering flow
+   */
+  async function handleRedirectState(redirectState) {
+    const pageType = LCDOMParser.detectPageType();
+
+    if (redirectState.isGathering) {
+      if (pageType === 'charts-revenue') {
+        // We're on the revenue chart - gather the data
+        await gatherAndCacheData();
+
+        // Now redirect back to original URL
+        if (redirectState.returnUrl && redirectState.returnUrl !== window.location.href) {
+          RCPStorage.setRedirectState({
+            ...redirectState,
+            isGathering: false,
+            isReturning: true
+          });
+          window.location.href = redirectState.returnUrl;
+        } else {
+          // Already on original URL or no return URL
+          RCPStorage.clearRedirectState();
+          await showForecastFromCache();
+        }
+      } else {
+        // Not on revenue chart yet - redirect there
+        LCUIInjector.showGatheringLoading();
+        window.location.href = REVENUE_CHART_URL;
+      }
+    } else if (redirectState.isReturning) {
+      RCPStorage.clearRedirectState();
+      await showForecastFromCache();
+    }
+  }
+
+  /**
+   * Gather revenue data from current page and cache it
+   */
+  async function gatherAndCacheData() {
+    try {
+      // Parse revenue data from the page
+      const revenueData = await LCDOMParser.parseRevenueData();
+      const granularity = LCDOMParser.getGranularity();
+      const projectId = LCDOMParser.getProjectId();
+
+      if (projectId && revenueData && revenueData.length > 0) {
+        // Save to history (this merges with existing data)
+        await RCPStorage.saveRevenueHistory(projectId, revenueData, granularity);
+      }
+    } catch (error) {
+      // Silent fail - will show error in UI
+    }
+  }
+
+  /**
+   * Show forecast panel using cached data
+   */
+  async function showForecastFromCache() {
+    const projectId = LCDOMParser.getProjectId();
+    if (!projectId) {
+      LCUIInjector.showError('Could not determine project. Please try again.');
+      return;
+    }
+
+    const history = await RCPStorage.getRevenueHistory(projectId);
+    if (!history || !history.data || history.data.length < 5) {
+      LCUIInjector.showError('Not enough revenue data. Please visit the Revenue chart page first.');
+      return;
+    }
+
+    // Load variance override setting
+    const settings = await RCPStorage.getSettings();
+    if (settings.varianceOverride) {
+      LCForecasting.setVarianceOverride(settings.varianceOverride);
+    }
+
+    // Calculate forecasts
+    const forecasts = LCForecasting.calculateForecasts(history.data, history.granularity || 'daily');
+
+    if (!forecasts) {
+      LCUIInjector.showError('Could not calculate forecasts. Please try refreshing data.');
+      return;
+    }
+
+    // Show the forecast panel
+    const scenario = settings.forecastScenario || 'better';
+    LCUIInjector.injectForecastPanel(forecasts, scenario);
+    LCUIInjector.updateLuckyCatButtonState(true);
+  }
+
+  /**
+   * Initiate data gathering flow
+   */
+  async function initiateDataGathering() {
+    const currentUrl = window.location.href;
+    const pageType = LCDOMParser.detectPageType();
+    const projectId = LCDOMParser.getProjectId();
+
+    // Store redirect state
+    RCPStorage.setRedirectState({
+      returnUrl: currentUrl,
+      isGathering: true,
+      isReturning: false,
+      projectId: projectId
+    });
+
+    if (pageType === 'charts-revenue') {
+      // Already on revenue chart - just gather data directly
+      LCUIInjector.showGatheringLoading();
+
+      // Small delay to let loading state render
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      await gatherAndCacheData();
+      RCPStorage.clearRedirectState();
+      await showForecastFromCache();
+    } else {
+      // Need to redirect to revenue chart
+      LCUIInjector.showGatheringLoading();
+      window.location.href = REVENUE_CHART_URL;
+    }
+  }
+
+  /**
+   * Initialize the forecasting panel (used when already on revenue chart)
    */
   async function initForecastingPanel() {
-    console.log('LC: ========== INITIALIZING FORECASTING PANEL ==========');
-
     // Show loading state
-    console.log('LC: Showing loading state...');
     LCUIInjector.showLoading();
 
     try {
       // Parse revenue data from the page
-      console.log('LC: Parsing revenue data from page...');
       const revenueData = await LCDOMParser.parseRevenueData();
       const granularity = LCDOMParser.getGranularity();
-
-      console.log('LC: Revenue data result:', revenueData ? `${revenueData.length} records` : 'null');
-      console.log('LC: Data granularity:', granularity);
-
-      if (revenueData && revenueData.length > 0) {
-        console.log('LC: First 3 records:', JSON.stringify(revenueData.slice(0, 3)));
-        console.log('LC: Last 3 records:', JSON.stringify(revenueData.slice(-3)));
-      }
-
-      // Get project ID early
       const projectId = LCDOMParser.getProjectId();
-      console.log('LC: Project ID:', projectId);
 
-      // Try to merge with cached historical data for better forecasts
-      let dataForForecasting = revenueData;
-
-      if (projectId && revenueData && revenueData.length > 0) {
-        // Save current data to build up history over time
+      if (revenueData && revenueData.length > 0 && projectId) {
+        // Save current data to build up history
         await RCPStorage.saveRevenueHistory(projectId, revenueData, granularity);
-
-        // Get the full history (which now includes the merged data)
-        const history = await RCPStorage.getRevenueHistory(projectId);
-        if (history && history.data && history.granularity === granularity) {
-          dataForForecasting = history.data;
-          console.log('LC: Using merged historical data:', dataForForecasting.length, 'total records');
-
-          // Log history stats
-          const stats = await RCPStorage.getHistoryStats(projectId);
-          if (stats) {
-            console.log('LC: History stats:', JSON.stringify(stats));
-          }
-        }
       }
 
-      // Minimum data check
-      const minRequired = granularity === 'monthly' ? 3 : 5;
-      if (!dataForForecasting || dataForForecasting.length < minRequired) {
-        console.log('LC: ❌ Not enough data for forecasting (need', minRequired + '+, got', dataForForecasting?.length || 0, ')');
-        LCUIInjector.removeForecastPanel();
-        return;
-      }
+      // Show forecast from cache (which now includes this data)
+      await showForecastFromCache();
 
-      // Warn if less than ideal amount of data
-      const idealAmount = granularity === 'monthly' ? 12 : 30;
-      if (dataForForecasting.length < idealAmount) {
-        console.log('LC: ⚠️ Limited data available (', dataForForecasting.length, 'records). Forecasts may be less accurate.');
-        console.log('LC: 💡 Tip: Visit the "All Time" daily view to build up historical data for better forecasts.');
-      }
-
-      console.log('LC: ✓ Found', dataForForecasting.length, granularity, 'data points');
-
-      // Calculate forecasts with granularity awareness
-      console.log('LC: Calculating forecasts...');
-      const forecasts = LCForecasting.calculateForecasts(dataForForecasting, granularity);
-
-      if (!forecasts) {
-        console.log('LC: ❌ Could not calculate forecasts');
-        LCUIInjector.removeForecastPanel();
-        return;
-      }
-
-      console.log('LC: ✓ Forecasts calculated:', JSON.stringify({
-        currentMonth: forecasts.currentMonth?.projected,
-        nextMonth: forecasts.nextMonth?.projected,
-        ytd: forecasts.ytd?.current,
-        granularity: forecasts.granularity
-      }));
-
-      // Find injection point
-      console.log('LC: Finding injection point...');
-      const injectionPoint = LCDOMParser.findInjectionPoint();
-      console.log('LC: Injection point found:', injectionPoint ? 'yes' : 'no');
-
-      // Inject the forecast panel
-      console.log('LC: Injecting forecast panel...');
-      const success = LCUIInjector.injectForecastPanel(forecasts);
-
-      if (success) {
-        console.log('LC: ✓ Forecast panel injected successfully!');
-
-        // Cache the forecast for popup access
-        if (projectId) {
-          await RCPStorage.setCache(`forecast_${projectId}`, forecasts, 5 * 60 * 1000);
-        }
-      } else {
-        console.log('LC: ❌ Failed to inject forecast panel');
-      }
     } catch (error) {
-      console.error('LC: ❌ Error initializing forecasting:', error);
-      console.error('LC: Stack trace:', error.stack);
-      LCUIInjector.removeForecastPanel();
+      LCUIInjector.showError('Error loading forecast. Please try again.');
     }
-
-    console.log('LC: ========== FORECASTING INIT COMPLETE ==========');
   }
 
   /**
    * Initialize ASA integration
    */
   async function initASAIntegration() {
-    console.log('LC: Initializing ASA integration...');
-
     try {
-      const success = await LCASAIntegration.init();
-
-      if (success) {
-        console.log('LC: ASA integration initialized successfully');
-      } else {
-        console.log('LC: ASA integration skipped or failed');
-      }
+      await LCASAIntegration.init();
     } catch (error) {
-      console.error('LC: Error initializing ASA integration', error);
+      // Silent fail
     }
+  }
+
+  /**
+   * Inject Lucky Cat button into header with retry logic
+   */
+  function injectHeaderButton() {
+    // Try to inject immediately
+    if (LCUIInjector.injectLuckyCatButton()) {
+      return;
+    }
+
+    // If failed, retry a few times as page may still be loading
+    let attempts = 0;
+    const maxAttempts = 10;
+    const interval = setInterval(() => {
+      attempts++;
+      if (LCUIInjector.injectLuckyCatButton() || attempts >= maxAttempts) {
+        clearInterval(interval);
+      }
+    }, 500);
   }
 
   /**
    * Handle navigation changes (SPA)
    */
   function handleNavigation() {
-    console.log('LC: Navigation detected, reinitializing...');
+    // Check for redirect state first (data gathering flow takes priority)
+    const redirectState = RCPStorage.getRedirectState();
+    if (redirectState) {
+      // Reset initialization flag and reinit to handle redirect
+      window.__LUCKY_CAT_INITIALIZED__ = false;
+      setTimeout(() => {
+        window.__LUCKY_CAT_INITIALIZED__ = true;
+        init();
+      }, 500);
+      return;
+    }
+
+    // Check if sidebar was open before navigation
+    const sidebarWasOpen = !!document.getElementById('lucky-cat-forecast-panel');
 
     // Reset initialization flag for new page
     window.__LUCKY_CAT_INITIALIZED__ = false;
 
-    // Clean up existing UI
-    LCUIInjector.removeForecastPanel();
-
     // Reinitialize with a small delay for page to render
-    setTimeout(() => {
+    setTimeout(async () => {
       window.__LUCKY_CAT_INITIALIZED__ = true;
+
+      if (sidebarWasOpen) {
+        // Sidebar was open - close it on navigation
+        LCUIInjector.removeForecastPanel();
+      }
+
+      // Run normal init (won't auto-show sidebar)
       init();
-    }, 1000);
+    }, 500);
   }
 
   /**
@@ -222,7 +288,6 @@
     // Method 1: URL change detection via MutationObserver
     const observer = new MutationObserver(() => {
       if (window.location.href !== lastUrl) {
-        console.log('LC: URL changed from', lastUrl, 'to', window.location.href);
         lastUrl = window.location.href;
         lastPathname = window.location.pathname;
         handleNavigation();
@@ -272,6 +337,14 @@
   function setupMessageListener() {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       switch (message.type) {
+        case 'TOGGLE_SIDEBAR':
+          handleToggleSidebar().then(() => {
+            sendResponse({ success: true });
+          }).catch(err => {
+            sendResponse({ success: false, error: err.message });
+          });
+          return true; // Async response
+
         case 'GET_FORECAST_DATA':
           handleGetForecastData(sendResponse);
           return true; // Async response
@@ -304,6 +377,42 @@
           break;
       }
     });
+  }
+
+  /**
+   * Toggle sidebar visibility with smart data fetching
+   */
+  async function handleToggleSidebar() {
+    const panel = document.getElementById('lucky-cat-forecast-panel');
+    if (panel) {
+      // Panel exists - remove it
+      LCUIInjector.removeForecastPanel();
+      LCUIInjector.updateLuckyCatButtonState(false);
+      return;
+    }
+
+    // Check if we're in a redirect flow
+    const redirectState = RCPStorage.getRedirectState();
+    if (redirectState?.isGathering) {
+      LCUIInjector.showGatheringLoading();
+      return;
+    }
+
+    // Check cache freshness
+    const projectId = LCDOMParser.getProjectId();
+
+    if (projectId) {
+      const isFresh = await RCPStorage.isRevenueHistoryFresh(projectId, CACHE_FRESHNESS_MS);
+
+      if (isFresh) {
+        // Fresh cache - show forecast immediately
+        await showForecastFromCache();
+        return;
+      }
+    }
+
+    // No fresh cache - need to gather data
+    await initiateDataGathering();
   }
 
   /**
@@ -358,15 +467,18 @@
   // Setup message listener
   setupMessageListener();
 
+  // Listen for custom event from Lucky Cat header button
+  window.addEventListener('luckyCatToggleSidebar', () => {
+    handleToggleSidebar();
+  });
+
   // Observe navigation changes
   observeNavigation();
 
   // Initial setup
   try {
     await init();
-    console.log('🐱 Lucky Cat ready!');
   } catch (error) {
-    console.error('🐱 LC: Initialization error', error);
-    console.error('🐱 LC: Stack:', error.stack);
+    // Silent fail
   }
 })();

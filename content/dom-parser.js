@@ -66,9 +66,6 @@ const LCDOMParser = {
   detectPageType() {
     const url = window.location.href;
     const path = window.location.pathname;
-    const pageTitle = document.title.toLowerCase();
-
-    console.log('LC: Detecting page type, path:', path, 'url:', url);
 
     // Charts/Revenue view - check URL and page content
     if (path.includes('/charts')) {
@@ -77,7 +74,6 @@ const LCDOMParser = {
       const pageText = h1?.textContent?.toLowerCase() || '';
 
       if (pageText.includes('revenue') || url.toLowerCase().includes('revenue')) {
-        console.log('LC: Detected charts-revenue page');
         return 'charts-revenue';
       }
       return 'charts-other';
@@ -97,12 +93,54 @@ const LCDOMParser = {
   },
 
   /**
-   * Get the current project ID from URL
+   * Get the current project ID from URL or page
    * @returns {string|null} Project ID
    */
   getProjectId() {
-    const match = window.location.pathname.match(/\/projects\/([^/]+)/);
-    return match ? match[1] : null;
+    // Try URL path first: /projects/[id]/...
+    const pathMatch = window.location.pathname.match(/\/projects\/([^/]+)/);
+    if (pathMatch) return pathMatch[1];
+
+    // Try URL query params
+    const urlParams = new URLSearchParams(window.location.search);
+    const projectParam = urlParams.get('project') || urlParams.get('project_id');
+    if (projectParam) return projectParam;
+
+    // Try to find project selector in page - look for selected project
+    const projectSelectors = [
+      '[data-testid="project-selector"] [data-testid="selected-item"]',
+      '[class*="ProjectSelector"] [class*="selected"]',
+      '[class*="project-dropdown"] [class*="active"]',
+      '[aria-label*="project"]',
+      '[data-project-id]'
+    ];
+
+    for (const selector of projectSelectors) {
+      const el = document.querySelector(selector);
+      if (el) {
+        const projectId = el.getAttribute('data-project-id') || el.getAttribute('data-value');
+        if (projectId) return projectId;
+      }
+    }
+
+    // Fallback: use hostname + app path as a stable identifier
+    // This ensures data is cached per RevenueCat account
+    const hostname = window.location.hostname;
+    if (hostname.includes('revenuecat.com')) {
+      // Use a default project ID for single-project accounts
+      // or derive from any visible project name
+      const projectNameEl = document.querySelector('[class*="ProjectName"], [class*="project-name"], header [class*="Title"]');
+      if (projectNameEl && projectNameEl.textContent) {
+        // Create a simple hash from project name
+        const name = projectNameEl.textContent.trim();
+        return 'rc_' + name.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 20);
+      }
+
+      // Last fallback: use a generic identifier for this account
+      return 'rc_default_project';
+    }
+
+    return null;
   },
 
   /**
@@ -123,7 +161,6 @@ const LCDOMParser = {
     for (const selector of selectors) {
       const element = document.querySelector(selector);
       if (element) {
-        console.log('LC: Found chart container with selector:', selector);
         return element;
       }
     }
@@ -132,12 +169,10 @@ const LCDOMParser = {
     const svgs = document.querySelectorAll('svg');
     for (const svg of svgs) {
       if (svg.querySelector('path') && svg.clientHeight > 200) {
-        console.log('LC: Found chart via SVG fallback');
         return svg.parentElement;
       }
     }
 
-    console.log('LC: Could not find chart container');
     return null;
   },
 
@@ -147,30 +182,24 @@ const LCDOMParser = {
    * @returns {Promise<Array|null>} Array of {date, revenue} objects
    */
   async parseRevenueData() {
-    console.log('LC: Starting to parse revenue data...');
-
     // Strategy 1: Parse from the visible data table (RevenueCat shows this below the chart)
     const tableData = await this.extractRevenueCatTableData();
     if (tableData && tableData.length > 0) {
-      console.log('LC: Successfully extracted', tableData.length, 'rows from table');
       return tableData;
     }
 
     // Strategy 2: Try to extract from React component state
     const reactData = this.extractReactData();
     if (reactData && reactData.length > 0) {
-      console.log('LC: Successfully extracted', reactData.length, 'rows from React');
       return reactData;
     }
 
     // Strategy 3: Try to extract from window globals
     const windowData = this.extractWindowData();
     if (windowData && windowData.length > 0) {
-      console.log('LC: Successfully extracted', windowData.length, 'rows from window');
       return windowData;
     }
 
-    console.log('LC: Could not extract revenue data');
     return null;
   },
 
@@ -180,24 +209,29 @@ const LCDOMParser = {
    * @returns {Array|null}
    */
   async extractRevenueCatTableData() {
-    // Wait a bit for the table to load
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Wait for table to appear with retries (RevenueCat loads data async)
+    const maxAttempts = 10;
+    const delayBetweenAttempts = 500; // ms
 
-    // Find all tables on the page
-    const tables = document.querySelectorAll('table');
-    console.log('LC: Found', tables.length, 'tables on page');
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      // Wait before checking
+      await new Promise(resolve => setTimeout(resolve, delayBetweenAttempts));
 
-    for (const table of tables) {
-      const data = this.parseRevenueCatTable(table);
-      if (data && data.length > 0) {
-        return data;
+      // Find all tables on the page
+      const tables = document.querySelectorAll('table');
+
+      for (const table of tables) {
+        const data = this.parseRevenueCatTable(table);
+        if (data && data.length > 0) {
+          return data;
+        }
       }
-    }
 
-    // Also try to find data in div-based tables (some dashboards use divs)
-    const gridData = this.parseGridBasedData();
-    if (gridData && gridData.length > 0) {
-      return gridData;
+      // Also try to find data in div-based tables (some dashboards use divs)
+      const gridData = this.parseGridBasedData();
+      if (gridData && gridData.length > 0) {
+        return gridData;
+      }
     }
 
     return null;
@@ -211,62 +245,110 @@ const LCDOMParser = {
    * @returns {Array|null}
    */
   parseRevenueCatTable(table) {
-    const headers = table.querySelectorAll('thead th, thead td');
-    const rows = table.querySelectorAll('tbody tr');
+    // Try both thead and direct th elements (some tables may not use thead)
+    let headers = table.querySelectorAll('thead th, thead td');
+    if (headers.length < 2) {
+      // Try getting headers from first row or direct th elements
+      headers = table.querySelectorAll('th');
+    }
+
+    // Try both tbody rows and direct tr elements
+    let rows = table.querySelectorAll('tbody tr');
+    if (rows.length === 0) {
+      // Some tables don't use tbody
+      rows = table.querySelectorAll('tr');
+      // Skip header row if we're getting all tr elements
+      if (rows.length > 0 && rows[0].querySelector('th')) {
+        rows = Array.from(rows).slice(1);
+      }
+    }
 
     if (headers.length < 2 || rows.length === 0) {
-      console.log('LC: Table has', headers.length, 'headers and', rows.length, 'rows');
       return null;
     }
 
     // Check if headers look like dates (e.g., "Jan 25 '26")
     const headerTexts = Array.from(headers).map(h => h.textContent.trim());
-    console.log('LC: Table headers:', headerTexts.slice(0, 5));
+
+    // Verify this looks like a data table with date headers
+    const dateHeaderCount = headerTexts.filter(h => this.parseRevenueCatDate(h)).length;
+
+    if (dateHeaderCount < 2) {
+      // Continue anyway in case it's a valid table
+    }
 
     // Detect data granularity from headers
     this.detectedGranularity = this.detectGranularity(headerTexts);
-    console.log('LC: Detected data granularity:', this.detectedGranularity);
 
-    // Find the Revenue row - MUST be explicit "Revenue", ignore other rows like "Ad Impressions", "Transactions", etc.
+    // Find the Revenue row
+    // RevenueCat V3 charts may not have labels IN the table - the label might be external
+    // In that case, identify revenue row by: first row with currency values ($)
     let revenueRow = null;
-    const rowLabels = []; // Track all row labels for debugging
 
-    for (const row of rows) {
-      const firstCell = row.querySelector('td');
-      if (firstCell) {
-        // Get all text content, normalize whitespace
-        const cellText = firstCell.textContent.replace(/\s+/g, ' ').trim().toLowerCase();
-        rowLabels.push(cellText);
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      const row = rows[rowIndex];
 
-        // Must match "revenue" exactly or start with "revenue" (e.g., "revenue (usd)")
-        // Do NOT match things like "ad impressions", "transactions", etc.
-        if (cellText === 'revenue' ||
-            cellText.startsWith('revenue ') ||
-            cellText.startsWith('revenue(')) {
-          revenueRow = row;
-          console.log('LC: ✓ Found Revenue row:', cellText);
-          break;
-        }
+      // Get ALL text from the entire row
+      const rowText = row.textContent.replace(/\s+/g, ' ').trim();
+      const rowTextLower = rowText.toLowerCase();
+
+      // Get first cell for analysis
+      const firstCell = row.querySelector('td, th');
+      let cellText = firstCell ? firstCell.textContent.trim() : '';
+
+      // Check if this row contains currency values (has $ signs)
+      const hasCurrencyValues = rowText.includes('$');
+
+      // Strategy 1: Look for explicit "Revenue" label
+      if (cellText.toLowerCase().includes('revenue') ||
+          rowTextLower.includes('revenue')) {
+        revenueRow = row;
+        break;
+      }
+
+      // Strategy 2: If no label but has currency values, assume it's the revenue row
+      // (RevenueCat V3 charts have revenue as first row with $ values)
+      if (hasCurrencyValues && !revenueRow) {
+        revenueRow = row;
+        // Don't break - keep looking for explicit label
       }
     }
 
-    console.log('LC: All row labels found:', rowLabels);
-
     // If no revenue row found, DO NOT fall back to first row - that could give us wrong data
     if (!revenueRow) {
-      console.log('LC: ❌ No explicit Revenue row found. Available rows:', rowLabels.join(', '));
-      console.log('LC: Skipping this table - need explicit Revenue row for V3 compatibility');
       return null;
     }
 
     // Extract dates from headers and revenue from cells
     const data = [];
-    const cells = revenueRow.querySelectorAll('td');
+    const cells = revenueRow.querySelectorAll('td, th');
 
-    // Skip first cell (it's the "Revenue" label), match remaining cells to headers
-    for (let i = 1; i < cells.length && i < headers.length; i++) {
-      const dateText = headerTexts[i];
-      const revenueText = cells[i].textContent.trim();
+    // Determine if first cell is a label or data
+    // If first cell contains currency ($), it's data; otherwise it might be a label
+    const firstCellText = cells[0]?.textContent.trim() || '';
+    const firstCellIsData = firstCellText.includes('$') || /^\d+$/.test(firstCellText);
+    const startIndex = firstCellIsData ? 0 : 1;
+
+    // Also check if first header is a label column (empty or non-date)
+    const firstHeaderIsLabel = !this.parseRevenueCatDate(headerTexts[0]);
+    const headerOffset = firstHeaderIsLabel ? 1 : 0;
+
+    // Match cells to headers
+    for (let cellIdx = startIndex; cellIdx < cells.length; cellIdx++) {
+      // Calculate corresponding header index
+      const headerIdx = cellIdx - startIndex + headerOffset;
+
+      if (headerIdx >= headers.length) break;
+
+      const dateText = headerTexts[headerIdx];
+      const revenueText = cells[cellIdx].textContent.trim();
+
+      // Skip "Row Average" or similar summary columns
+      if (dateText.toLowerCase().includes('average') ||
+          dateText.toLowerCase().includes('total') ||
+          dateText.toLowerCase().includes('sum')) {
+        continue;
+      }
 
       const date = this.parseRevenueCatDate(dateText);
       const revenue = this.parseCurrencyValue(revenueText);
@@ -276,7 +358,6 @@ const LCDOMParser = {
       }
     }
 
-    console.log('LC: Extracted', data.length, 'data points from table (granularity:', this.detectedGranularity, ')');
     return data.length > 0 ? data : null;
   },
 
@@ -290,7 +371,6 @@ const LCDOMParser = {
     const dateHeaders = headers.slice(1).filter(h => this.parseRevenueCatDate(h));
 
     if (dateHeaders.length < 2) {
-      console.log('LC: Not enough date headers to detect granularity');
       return 'daily'; // Default assumption
     }
 
@@ -303,8 +383,6 @@ const LCDOMParser = {
     }
 
     const diffDays = Math.abs((date2 - date1) / (1000 * 60 * 60 * 24));
-
-    console.log('LC: Date diff between first two columns:', diffDays, 'days');
 
     if (diffDays >= 28 && diffDays <= 31) {
       return 'monthly';
@@ -448,7 +526,7 @@ const LCDOMParser = {
             attempts++;
           }
         } catch (e) {
-          console.log('LC: Error extracting React data:', e.message);
+          // Silent fail
         }
       }
     }
@@ -548,7 +626,6 @@ const LCDOMParser = {
 
       return normalized.length > 0 ? normalized : null;
     } catch (e) {
-      console.log('LC: Error normalizing data:', e.message);
       return null;
     }
   },
@@ -573,7 +650,6 @@ const LCDOMParser = {
         // Return the element's parent container or the element itself
         const container = element.closest('[class*="container"]') || element.parentElement;
         if (container) {
-          console.log('LC: Found injection point via:', selector);
           return container;
         }
       }
@@ -582,11 +658,9 @@ const LCDOMParser = {
     // Fallback: find the chart and inject before it
     const chartContainer = this.findChartContainer();
     if (chartContainer) {
-      console.log('LC: Using chart container as injection point');
       return chartContainer;
     }
 
-    console.log('LC: Could not find injection point');
     return null;
   },
 

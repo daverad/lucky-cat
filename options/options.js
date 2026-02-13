@@ -20,10 +20,9 @@ async function loadSettings() {
     const settings = settingsResult.settings || {};
 
     // Apply settings to form
-    document.getElementById('forecastingEnabled').checked = settings.forecastingEnabled !== false;
     document.getElementById('confidenceRange').value = settings.confidenceRange || 'standard';
     document.getElementById('asaEnabled').checked = settings.asaEnabled === true;
-    document.getElementById('cacheDuration').value = settings.cacheDuration || 86400000;
+    document.getElementById('cacheDuration').value = settings.cacheDuration || 43200000; // Default to 12 hours
 
     // Load ASA credentials
     const credsResult = await chrome.storage.local.get('asa_credentials');
@@ -38,7 +37,7 @@ async function loadSettings() {
     // Toggle ASA credentials visibility
     toggleASACredentials(settings.asaEnabled === true);
   } catch (error) {
-    console.error('Error loading settings:', error);
+    // console.error('Error loading settings:', error);
     showStatus('saveStatus', 'Error loading settings', 'error');
   }
 }
@@ -178,7 +177,6 @@ async function saveSettings() {
   try {
     // Gather settings
     const settings = {
-      forecastingEnabled: document.getElementById('forecastingEnabled').checked,
       confidenceRange: document.getElementById('confidenceRange').value,
       asaEnabled: document.getElementById('asaEnabled').checked,
       cacheDuration: parseInt(document.getElementById('cacheDuration').value)
@@ -224,7 +222,7 @@ async function saveSettings() {
       status.className = 'save-status';
     }, 2000);
   } catch (error) {
-    console.error('Error saving settings:', error);
+    // console.error('Error saving settings:', error);
     showStatus('saveStatus', 'Error saving settings', 'error');
   } finally {
     button.disabled = false;

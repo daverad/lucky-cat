@@ -17,7 +17,7 @@ const LCForecasting = {
    */
   calculateForecasts(dailyData, granularity = null) {
     if (!dailyData || dailyData.length < 3) {
-      console.log('LC Forecasting: Not enough data, need at least 3 data points');
+      // Removed for production('LC Forecasting: Not enough data, need at least 3 data points');
       return null;
     }
 
@@ -30,7 +30,7 @@ const LCForecasting = {
       this.granularity = this.detectGranularityFromData(dailyData);
     }
 
-    console.log('LC Forecasting: Calculating with', dailyData.length, 'data points, granularity:', this.granularity);
+    // Removed for production('LC Forecasting: Calculating with', dailyData.length, 'data points, granularity:', this.granularity);
 
     // Sort data by date
     const sortedData = [...dailyData].sort((a, b) =>
@@ -75,7 +75,7 @@ const LCForecasting = {
    * @returns {Object}
    */
   calculateMonthlyForecasts(monthlyData) {
-    console.log('LC Forecasting: Using monthly calculation mode');
+    // Removed for production('LC Forecasting: Using monthly calculation mode');
 
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -145,11 +145,29 @@ const LCForecasting = {
       return date.getFullYear() === nextYear - 1 && date.getMonth() === nextMonth;
     });
 
-    let nextMonthProjected = avgMonthly;
+    // Use the same logic as daily mode - take the HIGHER of:
+    // 1. Recent monthly average
+    // 2. Last year same month × YoY growth
+    const recentMonthlyAvg = this.getRecentMonthlyAverage(monthlyData);
+    let projectedFromLastYear = avgMonthly;
+    let basedOn = 'Recent monthly average';
+
     if (nextMonthLastYear && nextMonthLastYear.revenue > 0) {
       const yoyGrowth = this.calculateYoYGrowth(monthlyData);
-      nextMonthProjected = nextMonthLastYear.revenue * yoyGrowth;
+      projectedFromLastYear = nextMonthLastYear.revenue * yoyGrowth;
     }
+
+    // Use the higher of recent trend vs last year + growth
+    let nextMonthProjected;
+    if (recentMonthlyAvg > projectedFromLastYear) {
+      nextMonthProjected = recentMonthlyAvg;
+      basedOn = 'Recent monthly average';
+    } else {
+      nextMonthProjected = projectedFromLastYear;
+      basedOn = nextMonthLastYear ? `${nextMonthName} ${nextYear - 1} + growth` : 'Recent average';
+    }
+
+    // Removed for production: LC Forecasting (monthly) next month calculation
 
     // YTD calculation
     const ytdCurrent = monthlyData
@@ -180,7 +198,12 @@ const LCForecasting = {
         mtdActual: Math.round(mtdActual),
         daysRemaining: daysRemaining,
         vsLastYear: vsLastYear,
-        confidence: daysRemaining < 10 ? 'high' : 'medium'
+        confidence: daysRemaining < 10 ? 'high' : 'medium',
+        calcDetails: {
+          monthlyAvg: Math.round(avgMonthly),
+          variancePct: Math.round(variance * 100),
+          isMonthlyData: true
+        }
       },
       nextMonth: {
         name: nextMonthName,
@@ -188,8 +211,13 @@ const LCForecasting = {
         projected: Math.round(nextMonthProjected),
         low: Math.round(nextMonthProjected * (1 - variance * 1.5)),
         high: Math.round(nextMonthProjected * (1 + variance * 1.5)),
-        basedOn: nextMonthLastYear ? `${nextMonthName} ${nextYear - 1}` : 'Recent average',
-        confidence: 'lower'
+        basedOn: basedOn,
+        confidence: 'lower',
+        calcDetails: {
+          recentMonthlyAvg: Math.round(recentMonthlyAvg),
+          variancePct: Math.round(variance * 1.5 * 100),
+          isMonthlyData: true
+        }
       },
       ytd: {
         current: Math.round(ytdCurrent),
@@ -236,11 +264,12 @@ const LCForecasting = {
     const currentMonth = now.getMonth();
     const today = now.getDate();
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const daysRemaining = daysInMonth - today;
 
     // Get month name
     const monthName = now.toLocaleDateString('en-US', { month: 'long' });
 
-    // Calculate MTD actual
+    // Calculate MTD actual from data
     const mtdData = data.filter(d => {
       const date = new Date(d.date);
       return date.getFullYear() === currentYear &&
@@ -250,32 +279,40 @@ const LCForecasting = {
 
     const mtdActual = mtdData.reduce((sum, d) => sum + (d.revenue || 0), 0);
 
-    // Get historical data for remaining days
-    const remainingDaysRevenue = [];
-    for (let day = today + 1; day <= daysInMonth; day++) {
-      const historicalForDay = this.getHistoricalDayAverage(data, day, currentMonth);
+    // Use recent daily average to project remaining days
+    // This is more robust than historical day-of-month when we have limited data
+    const recentDailyAvg = this.getRecentDailyAverage(data, 15);
+    const remainingForecast = recentDailyAvg * daysRemaining;
 
-      // Apply YoY growth adjustment
-      const yoyGrowth = this.calculateYoYGrowth(data);
-      const adjustedRevenue = historicalForDay * yoyGrowth;
-
-      remainingDaysRevenue.push(adjustedRevenue);
-    }
-
-    const remainingForecast = remainingDaysRevenue.reduce((sum, r) => sum + r, 0);
+    // Project total: MTD actual + remaining days forecast
     const projected = mtdActual + remainingForecast;
 
-    // Calculate confidence range
-    const stdDev = this.calculateStdDev(remainingDaysRevenue);
-    const confidenceMultiplier = 1.5; // Will be adjusted by settings
-    const low = Math.max(0, projected - (confidenceMultiplier * stdDev * Math.sqrt(daysInMonth - today)));
-    const high = projected + (confidenceMultiplier * stdDev * Math.sqrt(daysInMonth - today));
+    // Removed for production: LC Forecasting current month calculation
 
-    // Calculate vs last year same month
+    // Calculate confidence range based on variance
+    const variance = this.calculateMonthlyVariance(data);
+    const low = Math.max(0, projected * (1 - variance));
+    const high = projected * (1 + variance);
+
+    // Calculate vs last year same month (YoY)
     const lastYearSameMonth = this.getMonthTotal(data, currentMonth, currentYear - 1);
     let vsLastYear = null;
     if (lastYearSameMonth > 0) {
       vsLastYear = ((projected - lastYearSameMonth) / lastYearSameMonth) * 100;
+    }
+
+    // Calculate vs last month (MoM)
+    let lastMonth = currentMonth - 1;
+    let lastMonthYear = currentYear;
+    if (lastMonth < 0) {
+      lastMonth = 11;
+      lastMonthYear = currentYear - 1;
+    }
+    const lastMonthTotal = this.getMonthTotal(data, lastMonth, lastMonthYear);
+    const lastMonthName = new Date(lastMonthYear, lastMonth, 1).toLocaleDateString('en-US', { month: 'long' });
+    let vsMoM = null;
+    if (lastMonthTotal > 0) {
+      vsMoM = ((projected - lastMonthTotal) / lastMonthTotal) * 100;
     }
 
     return {
@@ -284,9 +321,18 @@ const LCForecasting = {
       low: Math.round(low),
       high: Math.round(high),
       mtdActual: Math.round(mtdActual),
-      daysRemaining: daysInMonth - today,
+      daysRemaining: daysRemaining,
       vsLastYear,
-      confidence: this.getConfidenceLevel(daysInMonth - today)
+      lastYearAmount: Math.round(lastYearSameMonth),
+      vsMoM,
+      lastMonthAmount: Math.round(lastMonthTotal),
+      lastMonthName,
+      confidence: this.getConfidenceLevel(daysRemaining),
+      // Calculation details for tooltip
+      calcDetails: {
+        dailyAvg: Math.round(recentDailyAvg),
+        variancePct: Math.round(variance * 100)
+      }
     };
   },
 
@@ -306,27 +352,34 @@ const LCForecasting = {
     }
 
     const monthName = new Date(nextYear, nextMonth, 1).toLocaleDateString('en-US', { month: 'long' });
+    const daysInNextMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
 
-    // Get same month from last year
+    // Primary method: Use recent daily average * days in month
+    // This is more accurate for growing apps than comparing to last year
+    const recentDailyAvg = this.getRecentDailyAverage(data, 15); // Last 15 days (excluding today)
+    const projectedFromRecent = recentDailyAvg * daysInNextMonth;
+
+    // Secondary: Get same month from last year for comparison
     const lastYearSameMonth = this.getMonthTotal(data, nextMonth, nextYear - 1);
 
-    // Get same month from two years ago for trend
-    const twoYearsAgoSameMonth = this.getMonthTotal(data, nextMonth, nextYear - 2);
+    // Use the higher of: recent projection or last year + growth
+    let projected = projectedFromRecent;
+    let basedOn = 'Recent 15-day average';
 
-    let yoyGrowth;
-    if (lastYearSameMonth > 0 && twoYearsAgoSameMonth > 0) {
-      yoyGrowth = lastYearSameMonth / twoYearsAgoSameMonth;
-    } else {
-      yoyGrowth = this.calculateYoYGrowth(data);
-    }
-
-    // Project next month
-    let projected;
     if (lastYearSameMonth > 0) {
-      projected = lastYearSameMonth * yoyGrowth;
-    } else {
-      // Fall back to recent monthly average with growth
-      projected = this.getRecentMonthlyAverage(data) * yoyGrowth;
+      const yoyGrowth = this.calculateYoYGrowth(data);
+      const projectedFromLastYear = lastYearSameMonth * yoyGrowth;
+
+      // Removed for production: LC Forecasting next month projections
+
+      // Use the higher projection (recent trend usually more relevant for growing apps)
+      if (projectedFromRecent > projectedFromLastYear) {
+        projected = projectedFromRecent;
+        basedOn = 'Recent 15-day average';
+      } else {
+        projected = projectedFromLastYear;
+        basedOn = `${monthName} ${nextYear - 1} + growth`;
+      }
     }
 
     // Wider confidence range for future month
@@ -340,8 +393,14 @@ const LCForecasting = {
       projected: Math.round(projected),
       low: Math.round(low),
       high: Math.round(high),
-      basedOn: lastYearSameMonth > 0 ? `${monthName} ${nextYear - 1}` : 'Recent trends',
-      confidence: 'lower' // Next month always lower confidence
+      basedOn: basedOn,
+      confidence: 'lower', // Next month always lower confidence
+      // Calculation details for tooltip
+      calcDetails: {
+        dailyAvg: Math.round(recentDailyAvg),
+        daysInMonth: daysInNextMonth,
+        variancePct: Math.round(variance * 100)
+      }
     };
   },
 
@@ -540,6 +599,26 @@ const LCForecasting = {
   },
 
   /**
+   * Get recent daily average (last N days, excluding today)
+   */
+  getRecentDailyAverage(data, days = 15) {
+    // Exclude today (current date may have incomplete data)
+    const today = new Date().toISOString().split('T')[0];
+    const dataExcludingToday = data.filter(d => d.date !== today);
+
+    // Get the most recent N data points
+    const recentData = dataExcludingToday.slice(-days);
+
+    if (recentData.length === 0) {
+      return this.average(data.map(d => d.revenue || 0));
+    }
+
+    const avg = this.average(recentData.map(d => d.revenue || 0));
+    // Removed for production: LC Forecasting recent days average calculation
+    return avg;
+  },
+
+  /**
    * Get recent monthly average
    */
   getRecentMonthlyAverage(data) {
@@ -558,13 +637,31 @@ const LCForecasting = {
   },
 
   /**
+   * Variance override setting (0 = auto, or 10/20/30/40/50)
+   */
+  varianceOverride: 0,
+
+  /**
+   * Set variance override
+   */
+  setVarianceOverride(value) {
+    this.varianceOverride = value || 0;
+  },
+
+  /**
    * Calculate monthly variance
    */
   calculateMonthlyVariance(data) {
+    // If user has set a manual variance override, use it
+    if (this.varianceOverride > 0) {
+      return this.varianceOverride / 100;
+    }
+
     const monthlyTotals = [];
     const now = new Date();
 
-    for (let i = 1; i <= 12; i++) {
+    // Use last 6 months for variance calculation (more responsive to recent changes)
+    for (let i = 1; i <= 6; i++) {
       const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const total = this.getMonthTotal(data, targetDate.getMonth(), targetDate.getFullYear());
       if (total > 0) {
