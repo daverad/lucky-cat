@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Lucky Cat",
   "version": "1.0.0",
-  "description": "Revenue forecasting and Apple Search Ads ROI tracking for RevenueCat",
+  "description": "Revenue forecasting for RevenueCat. See monthly projections with confidence ranges.",
   "default_locale": "en",
 
   "permissions": [
