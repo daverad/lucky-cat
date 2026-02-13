@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Lucky Cat",
   "version": "1.0.0",
-  "description": "Revenue forecasting for RevenueCat. See monthly projections with confidence ranges.",
+  "description": "Lucky Cat adds revenue forecasting to your RevenueCat dashboard.",
   "default_locale": "en",
 
   "permissions": [
