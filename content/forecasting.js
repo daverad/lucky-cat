@@ -46,6 +46,7 @@ const LCForecasting = {
       currentMonth: this.forecastCurrentMonth(sortedData),
       nextMonth: this.forecastNextMonth(sortedData),
       ytd: this.calculateYTDComparison(sortedData),
+      fullYear: this.calculateFullYearForecast(sortedData),
       patterns: this.analyzeDailyPatterns(sortedData),
       insight: this.generateInsight(sortedData),
       granularity: this.granularity
@@ -189,6 +190,9 @@ const LCForecasting = {
       ytdPctChange = ((ytdCurrent - ytdLastYear) / ytdLastYear) * 100;
     }
 
+    // Calculate full year forecast for monthly data
+    const fullYearForecast = this.calculateFullYearForecastMonthly(monthlyData, ytdCurrent, ytdLastYear, currentYear);
+
     return {
       currentMonth: {
         name: monthName,
@@ -227,6 +231,7 @@ const LCForecasting = {
         currentYear: currentYear,
         lastYearLabel: currentYear - 1
       },
+      fullYear: fullYearForecast,
       patterns: null, // Daily patterns don't apply to monthly data
       insight: this.generateMonthlyInsight(monthlyData),
       granularity: 'monthly',
@@ -251,6 +256,58 @@ const LCForecasting = {
     }
 
     return null;
+  },
+
+  /**
+   * Calculate full year forecast for monthly granularity data
+   * Uses last year's total × (1 + YTD YoY growth rate)
+   * @param {Array} monthlyData - Monthly revenue data
+   * @param {number} ytdCurrent - Current YTD revenue
+   * @param {number} ytdLastYear - Last year's YTD revenue
+   * @param {number} currentYear - Current year
+   * @returns {Object} Full year forecast
+   */
+  calculateFullYearForecastMonthly(monthlyData, ytdCurrent, ytdLastYear, currentYear) {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+
+    // Get last year's full year total
+    const lastYearTotal = monthlyData
+      .filter(d => {
+        const date = new Date(d.date);
+        return date.getFullYear() === currentYear - 1;
+      })
+      .reduce((sum, d) => sum + (d.revenue || 0), 0);
+
+    // Calculate YoY growth rate from YTD comparison
+    let yoyGrowthRate = 0;
+    if (ytdLastYear > 0) {
+      yoyGrowthRate = (ytdCurrent - ytdLastYear) / ytdLastYear;
+    }
+
+    // Full year projection = Last year's total × (1 + YTD YoY growth rate)
+    let projected = lastYearTotal * (1 + yoyGrowthRate);
+
+    // If no last year data, fall back to extrapolating YTD
+    if (lastYearTotal === 0 && ytdCurrent > 0) {
+      const monthsPassed = currentMonth + 1;
+      const monthlyAvg = ytdCurrent / monthsPassed;
+      projected = monthlyAvg * 12;
+    }
+
+    // Range: ±15%
+    const variance = 0.15;
+    const low = projected * (1 - variance);
+    const high = projected * (1 + variance);
+
+    return {
+      projected: Math.round(projected),
+      low: Math.round(low),
+      high: Math.round(high),
+      lastYearTotal: Math.round(lastYearTotal),
+      currentYear,
+      yoyGrowthRate: Math.round(yoyGrowthRate * 100)
+    };
   },
 
   /**
@@ -401,6 +458,75 @@ const LCForecasting = {
         daysInMonth: daysInNextMonth,
         variancePct: Math.round(variance * 100)
       }
+    };
+  },
+
+  /**
+   * Calculate full year forecast
+   * Uses last year's total × (1 + YTD YoY growth rate)
+   * This ensures the full year forecast growth matches YTD growth
+   * @param {Array} data - Sorted daily revenue data
+   * @returns {Object} Full year forecast
+   */
+  calculateFullYearForecast(data) {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+
+    // Get last year's full year total
+    const lastYearTotal = data
+      .filter(d => {
+        const date = new Date(d.date);
+        return date.getFullYear() === currentYear - 1;
+      })
+      .reduce((sum, d) => sum + (d.revenue || 0), 0);
+
+    // Get YTD current year revenue
+    const ytdCurrent = data
+      .filter(d => {
+        const date = new Date(d.date);
+        return date.getFullYear() === currentYear && date <= now;
+      })
+      .reduce((sum, d) => sum + (d.revenue || 0), 0);
+
+    // Get last year's YTD (same period) for YoY growth calculation
+    const sameTimeLastYear = new Date(currentYear - 1, now.getMonth(), now.getDate());
+    const ytdLastYear = data
+      .filter(d => {
+        const date = new Date(d.date);
+        return date.getFullYear() === currentYear - 1 && date <= sameTimeLastYear;
+      })
+      .reduce((sum, d) => sum + (d.revenue || 0), 0);
+
+    // Calculate YoY growth rate from YTD comparison
+    let yoyGrowthRate = 0;
+    if (ytdLastYear > 0) {
+      yoyGrowthRate = (ytdCurrent - ytdLastYear) / ytdLastYear;
+    }
+
+    // Full year projection = Last year's total × (1 + YTD YoY growth rate)
+    // This ensures the full year % change matches the YTD % change
+    let projected = lastYearTotal * (1 + yoyGrowthRate);
+
+    // If no last year data, fall back to extrapolating YTD
+    if (lastYearTotal === 0 && ytdCurrent > 0) {
+      const startOfYear = new Date(currentYear, 0, 1);
+      const daysPassed = Math.floor((now - startOfYear) / (1000 * 60 * 60 * 24)) + 1;
+      const dailyAvg = ytdCurrent / daysPassed;
+      projected = dailyAvg * 365;
+    }
+
+    // Range: ±15%
+    const variance = 0.15;
+    const low = projected * (1 - variance);
+    const high = projected * (1 + variance);
+
+    return {
+      projected: Math.round(projected),
+      low: Math.round(low),
+      high: Math.round(high),
+      lastYearTotal: Math.round(lastYearTotal),
+      currentYear,
+      yoyGrowthRate: Math.round(yoyGrowthRate * 100)
     };
   },
 

@@ -99,7 +99,7 @@ body {
   background: var(--lc-bg-primary);
   border: 1px solid var(--lc-border);
   border-radius: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
   overflow: hidden;
 }
 
@@ -261,6 +261,11 @@ body {
   cursor: not-allowed;
 }
 
+/* Full-width buttons in sections */
+.section-content .button {
+  width: 100%;
+}
+
 .button-row {
   display: flex;
   align-items: center;
@@ -351,10 +356,11 @@ body {
 .footer {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 16px;
   margin-top: 24px;
-  padding-top: 24px;
-  border-top: 1px solid var(--lc-border);
+  padding-top: 16px;
+  min-height: 32px;
 }
 
 /* Responsive */

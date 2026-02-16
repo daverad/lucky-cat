@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lucky Cat",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Lucky Cat adds revenue forecasting to your RevenueCat dashboard.",
   "default_locale": "en",
 

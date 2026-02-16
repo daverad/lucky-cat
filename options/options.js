@@ -2,6 +2,17 @@
  * Lucky Cat - Options Page Script
  */
 
+/**
+ * Debounce helper for text input autosave
+ */
+function debounce(func, wait) {
+  let timeout;
+  return function(...args) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func.apply(this, args), wait);
+  };
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   // Load saved settings
   await loadSettings();
@@ -46,9 +57,15 @@ async function loadSettings() {
  * Setup event listeners
  */
 function setupEventListeners() {
-  // ASA enabled toggle
+  // Autosave for dropdowns
+  ['confidenceRange', 'cacheDuration'].forEach(id => {
+    document.getElementById(id).addEventListener('change', autoSave);
+  });
+
+  // ASA enabled toggle with autosave
   document.getElementById('asaEnabled').addEventListener('change', (e) => {
     toggleASACredentials(e.target.checked);
+    autoSave();
   });
 
   // Toggle password visibility
@@ -65,14 +82,17 @@ function setupEventListeners() {
     }
   });
 
+  // Autosave for text inputs with debounce
+  const debouncedAutoSave = debounce(autoSave, 500);
+  ['asaClientId', 'asaClientSecret', 'asaOrgId'].forEach(id => {
+    document.getElementById(id).addEventListener('input', debouncedAutoSave);
+  });
+
   // Test connection button
   document.getElementById('testConnection').addEventListener('click', testASAConnection);
 
   // Clear cache button
   document.getElementById('clearCache').addEventListener('click', clearCache);
-
-  // Save settings button
-  document.getElementById('saveSettings').addEventListener('click', saveSettings);
 }
 
 /**
@@ -226,6 +246,58 @@ async function saveSettings() {
     showStatus('saveStatus', 'Error saving settings', 'error');
   } finally {
     button.disabled = false;
+  }
+}
+
+/**
+ * Auto-save settings on change
+ */
+async function autoSave() {
+  try {
+    // Gather settings
+    const settings = {
+      confidenceRange: document.getElementById('confidenceRange').value,
+      asaEnabled: document.getElementById('asaEnabled').checked,
+      cacheDuration: parseInt(document.getElementById('cacheDuration').value)
+    };
+
+    // Save settings
+    await chrome.storage.local.set({ settings });
+
+    // Save ASA credentials if enabled
+    if (settings.asaEnabled) {
+      const clientId = document.getElementById('asaClientId').value.trim();
+      const clientSecret = document.getElementById('asaClientSecret').value.trim();
+      const orgId = document.getElementById('asaOrgId').value.trim();
+
+      if (clientId && clientSecret && orgId) {
+        // Only save if client ID format is valid
+        if (clientId.startsWith('SEARCHADS.')) {
+          await chrome.storage.local.set({
+            asa_credentials: {
+              clientId,
+              clientSecret,
+              orgId,
+              configured: true,
+              configuredAt: Date.now()
+            }
+          });
+        }
+      }
+    } else {
+      // Clear ASA credentials if disabled
+      await chrome.storage.local.remove('asa_credentials');
+    }
+
+    // Show brief saved indicator
+    showStatus('saveStatus', '✓ Saved', 'success');
+    setTimeout(() => {
+      const status = document.getElementById('saveStatus');
+      status.textContent = '';
+      status.className = 'save-status';
+    }, 1500);
+  } catch (error) {
+    showStatus('saveStatus', 'Error saving', 'error');
   }
 }
 

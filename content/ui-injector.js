@@ -106,8 +106,16 @@ const LCUIInjector = {
 
       <div class="lc-settings-content">
         <div class="lc-settings-section">
+          <div class="lc-settings-label">Feedback & Feature Requests</div>
+          <div class="lc-settings-help">Have an idea or found a bug? We'd love to hear from you.</div>
+          <a href="mailto:meow@luckycat.tools?subject=Lucky%20Cat%20Feedback" class="lc-button lc-button--secondary lc-mt-sm" style="text-decoration: none; display: inline-block; width: 100%; text-align: center;">
+            Contact Us
+          </a>
+        </div>
+
+        <div class="lc-settings-section">
           <div class="lc-settings-label">Forecast range variance</div>
-          <select id="lc-variance-override" class="lc-select">
+          <select id="lc-variance-override" class="lc-select" style="width: 100%;">
             <option value="0" ${currentVariance === 0 ? 'selected' : ''}>Auto (based on history)</option>
             <option value="10" ${currentVariance === 10 ? 'selected' : ''}>±10%</option>
             <option value="20" ${currentVariance === 20 ? 'selected' : ''}>±20%</option>
@@ -119,7 +127,7 @@ const LCUIInjector = {
         </div>
 
         <div class="lc-settings-section">
-          <button class="lc-button lc-button--secondary" id="lc-refresh-data">
+          <button class="lc-button lc-button--secondary" id="lc-refresh-data" style="width: 100%;">
             Refresh revenue data
           </button>
           <span id="lc-refresh-status" class="lc-status-text"></span>
@@ -127,7 +135,7 @@ const LCUIInjector = {
         </div>
 
         <div class="lc-settings-section">
-          <button class="lc-button lc-button--secondary" id="lc-clear-cache">
+          <button class="lc-button lc-button--secondary" id="lc-clear-cache" style="width: 100%;">
             Clear all cached data
           </button>
           <span id="lc-cache-status" class="lc-status-text"></span>
@@ -141,20 +149,9 @@ const LCUIInjector = {
             <p><strong>Range:</strong> Based on historical variance in your monthly revenue, or your selected variance setting.</p>
           </div>
         </div>
-
-        <div class="lc-settings-section">
-          <div class="lc-settings-label">Feedback & Feature Requests</div>
-          <div class="lc-settings-help">Have an idea or found a bug? We'd love to hear from you.</div>
-          <a href="mailto:meow@luckycat.tools?subject=Lucky%20Cat%20Feedback" class="lc-button lc-button--secondary lc-mt-sm" style="text-decoration: none; display: inline-block;">
-            Contact Us
-          </a>
-        </div>
       </div>
 
       <div class="lc-panel-footer">
-        <button class="lc-button lc-button--primary" id="lc-save-settings">
-          Save Settings
-        </button>
         <span id="lc-save-status" class="lc-status-text"></span>
       </div>
     `;
@@ -177,11 +174,11 @@ const LCUIInjector = {
       });
     }
 
-    // Save settings button
-    const saveBtn = this.forecastPanel.querySelector('#lc-save-settings');
-    if (saveBtn) {
-      saveBtn.addEventListener('click', async () => {
-        const varianceOverride = parseInt(this.forecastPanel.querySelector('#lc-variance-override')?.value || '0');
+    // Autosave on variance dropdown change
+    const varianceSelect = this.forecastPanel.querySelector('#lc-variance-override');
+    if (varianceSelect) {
+      varianceSelect.addEventListener('change', async () => {
+        const varianceOverride = parseInt(varianceSelect.value || '0');
 
         await RCPStorage.saveSettings({
           varianceOverride
@@ -189,8 +186,8 @@ const LCUIInjector = {
 
         const statusEl = this.forecastPanel.querySelector('#lc-save-status');
         if (statusEl) {
-          statusEl.textContent = 'Saved!';
-          setTimeout(() => { statusEl.textContent = ''; }, 2000);
+          statusEl.textContent = '✓ Saved';
+          setTimeout(() => { statusEl.textContent = ''; }, 1500);
         }
       });
     }
@@ -351,6 +348,17 @@ const LCUIInjector = {
             </div>
           </div>
         </div>
+
+        <!-- Full Year Forecast -->
+        ${forecasts.fullYear ? `
+        <div class="lc-forecast-item">
+          <div class="lc-metric-label">${currentYear} Full Year Forecast</div>
+          <div class="lc-metric">${RCPFormat.currency(forecasts.fullYear.projected)}</div>
+          <div class="lc-forecast-range">
+            Range: ${RCPFormat.currencyRange(forecasts.fullYear.low, forecasts.fullYear.high)}
+          </div>
+        </div>
+        ` : ''}
       </div>
 
       ${forecasts.granularity === 'monthly' ? `
@@ -471,6 +479,17 @@ const LCUIInjector = {
             </div>
           </div>
         </div>
+
+        <!-- Full Year Forecast -->
+        ${forecasts.fullYear ? `
+        <div class="lc-forecast-item">
+          <div class="lc-metric-label">${currentYear} Full Year Forecast</div>
+          <div class="lc-metric">${RCPFormat.currency(forecasts.fullYear.projected)}</div>
+          <div class="lc-forecast-range">
+            Range: ${RCPFormat.currencyRange(forecasts.fullYear.low, forecasts.fullYear.high)}
+          </div>
+        </div>
+        ` : ''}
       </div>
 
       ${forecasts.granularity === 'monthly' ? `
