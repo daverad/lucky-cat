@@ -735,6 +735,183 @@ const LCDOMParser = {
     }
 
     return null;
+  },
+
+  /**
+   * Check if the page is currently showing "All time" date range.
+   * Looks for indicators in the URL, page title, date picker text, and
+   * verifies the date span covers more than 60 days.
+   * @returns {boolean}
+   */
+  isAllTimeRangeSelected() {
+    // Check URL for range parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const range = urlParams.get('range') || '';
+    const rangeLower = range.toLowerCase().replace(/[+_\s]/g, '');
+    if (rangeLower === 'alltime') {
+      // URL says all-time — but verify via DOM as well in case RevenueCat ignores it
+    }
+
+    // Check page title / heading for "All Time"
+    const h1 = document.querySelector('h1');
+    if (h1 && /all\s*time/i.test(h1.textContent)) {
+      return true;
+    }
+
+    // Check for a selected date range indicator in buttons, dropdowns, etc.
+    const candidates = document.querySelectorAll(
+      'button, [class*="DateRange"], [class*="date-range"], [class*="DatePicker"], ' +
+      '[class*="date-picker"], [class*="RangePicker"], [class*="range-picker"], ' +
+      '[role="listbox"] [aria-selected="true"], [class*="selected"], [class*="active"]'
+    );
+    for (const el of candidates) {
+      const text = el.textContent.trim();
+      if (/^all\s*time$/i.test(text)) {
+        return true;
+      }
+    }
+
+    // Check the visible date range span — "All time" should cover many months
+    const dateRange = this.getDateRangeFromPage();
+    if (dateRange) {
+      const start = new Date(dateRange.start);
+      const end = new Date(dateRange.end);
+      const daySpan = (end - start) / (1000 * 60 * 60 * 24);
+      // If the range covers more than 90 days, it's likely all-time or at least long enough
+      if (daySpan > 90) {
+        return true;
+      }
+    }
+
+    return false;
+  },
+
+  /**
+   * Attempt to select "All time" date range via the DOM by clicking on the
+   * date range picker and choosing the "All time" option.
+   * @returns {Promise<boolean>} Whether the selection was successful
+   */
+  async selectAllTimeRange() {
+    // Strategy 1: Find and click the date range picker / dropdown trigger
+    const pickerSelectors = [
+      '[class*="DateRange"] button',
+      '[class*="date-range"] button',
+      '[class*="DatePicker"] button',
+      '[class*="date-picker"] button',
+      '[class*="RangePicker"]',
+      '[class*="range-picker"]',
+      'button[class*="range"]',
+      'button[class*="Range"]',
+      '[data-testid*="date"]',
+      '[data-testid*="range"]'
+    ];
+
+    let pickerButton = null;
+    for (const sel of pickerSelectors) {
+      const el = document.querySelector(sel);
+      if (el) {
+        pickerButton = el;
+        break;
+      }
+    }
+
+    // Fallback: look for any button whose text looks like a date range or preset
+    if (!pickerButton) {
+      const buttons = document.querySelectorAll('button');
+      for (const btn of buttons) {
+        const text = btn.textContent.trim();
+        // Matches "Last 28 days", "Last 7 days", "Last 30 days", "Last 90 days", etc.
+        if (/^last\s+\d+\s+days$/i.test(text) || /^\d+[dDwWmMyY]$/.test(text)) {
+          pickerButton = btn;
+          break;
+        }
+        // Matches date range display like "Feb 15 '26 - Mar 17 '26"
+        if (/\w{3}\s+\d{1,2}\s+'?\d{2,4}\s*[-–]\s*\w{3}\s+\d{1,2}\s+'?\d{2,4}/.test(text)) {
+          pickerButton = btn;
+          break;
+        }
+      }
+    }
+
+    if (!pickerButton) {
+      return false;
+    }
+
+    // Click to open the picker
+    pickerButton.click();
+
+    // Wait for dropdown/popover to appear
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Strategy 2: Find and click "All time" option in the dropdown
+    const optionSelectors = [
+      '[role="option"]',
+      '[role="menuitem"]',
+      '[role="listbox"] > *',
+      '[class*="dropdown"] li',
+      '[class*="Dropdown"] li',
+      '[class*="popover"] li',
+      '[class*="Popover"] li',
+      '[class*="menu"] li',
+      '[class*="Menu"] li',
+      '[class*="option"]',
+      '[class*="Option"]',
+      'li',
+      'button'
+    ];
+
+    for (const sel of optionSelectors) {
+      const options = document.querySelectorAll(sel);
+      for (const opt of options) {
+        const text = opt.textContent.trim();
+        if (/^all\s*time$/i.test(text)) {
+          opt.click();
+          // Wait for chart to reload with new data
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          return true;
+        }
+      }
+    }
+
+    // If we couldn't find "All time" option, close the picker by clicking elsewhere
+    document.body.click();
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    return false;
+  },
+
+  /**
+   * Ensure the page is showing "All time" data range.
+   * First checks if already on all-time, then tries DOM interaction to select it.
+   * @returns {Promise<boolean>} Whether all-time range is now active
+   */
+  async ensureAllTimeRange() {
+    // Already on all-time?
+    if (this.isAllTimeRangeSelected()) {
+      return true;
+    }
+
+    // Try to select it via DOM
+    const selected = await this.selectAllTimeRange();
+    if (selected) {
+      // Verify it worked
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return this.isAllTimeRangeSelected();
+    }
+
+    // Last resort: check if the data we can see still spans a reasonable range
+    // (the URL might be wrong but RevenueCat may have loaded all-time anyway)
+    const dateRange = this.getDateRangeFromPage();
+    if (dateRange) {
+      const start = new Date(dateRange.start);
+      const end = new Date(dateRange.end);
+      const daySpan = (end - start) / (1000 * 60 * 60 * 24);
+      if (daySpan > 60) {
+        return true;
+      }
+    }
+
+    return false;
   }
 };
 

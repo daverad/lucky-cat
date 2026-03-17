@@ -256,8 +256,8 @@ chrome.runtime.onInstalled.addListener((details) => {
  * Handle extension icon click - toggle the sidebar or navigate to revenue chart
  */
 chrome.action.onClicked.addListener((tab) => {
-  // All-time daily revenue chart URL
-  const revenueChartUrl = 'https://app.revenuecat.com/charts/revenue?range=All+time&resolution=0&chart_type=Stacked+area';
+  // All-time daily revenue chart URL (try newer param format first)
+  const revenueChartUrl = 'https://app.revenuecat.com/charts/revenue?range=allTime&resolution=day&chart_type=stacked_area';
 
   if (tab.url && tab.url.includes('app.revenuecat.com')) {
     // On RevenueCat - send message to toggle sidebar
