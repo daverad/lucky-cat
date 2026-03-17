@@ -7,7 +7,13 @@
   'use strict';
 
   // Constants
-  const REVENUE_CHART_URL = 'https://app.revenuecat.com/charts/revenue?range=All+time&resolution=0&chart_type=Stacked+area';
+  // Try multiple URL formats since RevenueCat may change parameter names/values
+  const REVENUE_CHART_URLS = [
+    'https://app.revenuecat.com/charts/revenue?range=allTime&resolution=day&chart_type=stacked_area',
+    'https://app.revenuecat.com/charts/revenue?range=all_time&resolution=daily&chart_type=stacked_area',
+    'https://app.revenuecat.com/charts/revenue?range=All+time&resolution=0&chart_type=Stacked+area'
+  ];
+  const REVENUE_CHART_URL = REVENUE_CHART_URLS[0];
   const CACHE_FRESHNESS_MS = 12 * 60 * 60 * 1000; // 12 hours
 
   // Check if extension context is valid (handles reload scenario)
@@ -98,10 +104,40 @@
   }
 
   /**
-   * Gather revenue data from current page and cache it
+   * Gather revenue data from current page and cache it.
+   * Verifies that the "All time" date range is active before scraping.
+   * If the URL params didn't work, falls back to clicking the date picker.
    */
   async function gatherAndCacheData() {
     try {
+      // Ensure we're viewing "All time" data — RevenueCat may ignore URL params
+      const isAllTime = await LCDOMParser.ensureAllTimeRange();
+
+      if (!isAllTime) {
+        // Try alternative URL formats by navigating to the next variant
+        const currentUrl = window.location.href;
+        const urlIndex = REVENUE_CHART_URLS.findIndex(u => currentUrl.startsWith(u.split('?')[0]) && currentUrl.includes(new URL(u).searchParams.get('range')));
+        const nextIndex = (urlIndex + 1) % REVENUE_CHART_URLS.length;
+
+        // Only retry with a different URL if we haven't tried them all
+        const triedUrls = JSON.parse(sessionStorage.getItem('lc_tried_urls') || '[]');
+        if (triedUrls.length < REVENUE_CHART_URLS.length) {
+          triedUrls.push(currentUrl);
+          sessionStorage.setItem('lc_tried_urls', JSON.stringify(triedUrls));
+          window.location.href = REVENUE_CHART_URLS[nextIndex];
+          return;
+        }
+
+        // All URL variants tried — proceed with whatever data we have
+        sessionStorage.removeItem('lc_tried_urls');
+      } else {
+        // Success — clear retry state
+        sessionStorage.removeItem('lc_tried_urls');
+      }
+
+      // Wait a bit longer for the chart data to fully load after range selection
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
       // Parse revenue data from the page
       const revenueData = await LCDOMParser.parseRevenueData();
       const granularity = LCDOMParser.getGranularity();
@@ -193,6 +229,9 @@
     LCUIInjector.showLoading();
 
     try {
+      // Ensure we're viewing all-time data before parsing
+      await LCDOMParser.ensureAllTimeRange();
+
       // Parse revenue data from the page
       const revenueData = await LCDOMParser.parseRevenueData();
       const granularity = LCDOMParser.getGranularity();
