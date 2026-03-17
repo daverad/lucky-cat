@@ -76,8 +76,6 @@ const LCForecasting = {
    * @returns {Object}
    */
   calculateMonthlyForecasts(monthlyData) {
-    // Removed for production('LC Forecasting: Using monthly calculation mode');
-
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
@@ -85,6 +83,7 @@ const LCForecasting = {
 
     // Get the most recent complete months
     const recentMonths = monthlyData.slice(-12);
+    const avgMonthly = this.average(recentMonths.map(d => d.revenue || 0));
 
     // Find current month's data if available
     const currentMonthData = monthlyData.find(d => {
@@ -98,79 +97,159 @@ const LCForecasting = {
       return date.getFullYear() === currentYear - 1 && date.getMonth() === currentMonth;
     });
 
-    // Calculate average monthly revenue
-    const avgMonthly = this.average(recentMonths.map(d => d.revenue || 0));
-
-    // Project current month (if we have partial data, extrapolate; otherwise use average)
-    let currentMonthProjected = avgMonthly;
+    // ── Current Month: Blended projection ──
     let mtdActual = 0;
     let daysRemaining = 0;
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const dayOfMonth = now.getDate();
+    const monthProgress = dayOfMonth / daysInMonth;
 
+    // Signal 1: MTD extrapolation (always available if we have current month data)
+    let signal1_total = avgMonthly;
     if (currentMonthData) {
       mtdActual = currentMonthData.revenue;
-      // If it's a partial month, extrapolate
-      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-      const dayOfMonth = now.getDate();
       daysRemaining = daysInMonth - dayOfMonth;
-
       if (dayOfMonth < daysInMonth - 5) {
-        // Extrapolate from MTD
-        currentMonthProjected = (mtdActual / dayOfMonth) * daysInMonth;
+        signal1_total = (mtdActual / dayOfMonth) * daysInMonth;
       } else {
-        // Close to end of month, use actual
-        currentMonthProjected = mtdActual;
+        signal1_total = mtdActual;
       }
     }
 
-    // Calculate YoY change
+    // Signal 2: Same month last year x blended YoY growth
+    let signal2_total = null;
+    if (lastYearSameMonth && lastYearSameMonth.revenue > 0) {
+      const blendedGrowth = this.calculateBlendedYoYGrowth(monthlyData);
+      signal2_total = lastYearSameMonth.revenue * blendedGrowth.multiplier;
+
+      // Pacing refinement if we have MTD data and enough of the month has passed
+      if (currentMonthData && monthProgress > 0.15) {
+        const lastYearMTDEntry = monthlyData.find(d => {
+          const date = new Date(d.date);
+          return date.getFullYear() === currentYear - 1 && date.getMonth() === currentMonth;
+        });
+        if (lastYearMTDEntry && lastYearMTDEntry.revenue > 0) {
+          // For monthly data, estimate pacing based on proportional MTD
+          const lastYearFullMonth = lastYearMTDEntry.revenue;
+          const pacingProjection = lastYearFullMonth * (signal1_total / mtdActual) * (mtdActual / lastYearFullMonth);
+          signal2_total = signal2_total * (1 - monthProgress) + pacingProjection * monthProgress;
+        }
+      }
+    }
+
+    // Signal 3: MoM trajectory
+    let signal3_total = null;
+    const momTrend = this.calculateMoMTrend(monthlyData, 6);
+    if (momTrend && momTrend.r2 > 0.3) {
+      signal3_total = momTrend.projectedCurrentMonth;
+    }
+
+    // Adaptive weights for current month
+    let cw1, cw2, cw3;
+    if (signal2_total !== null && signal3_total !== null) {
+      cw1 = 0.30 + monthProgress * 0.40;
+      cw2 = 0.45 - monthProgress * 0.25;
+      cw3 = 0.25 - monthProgress * 0.15;
+    } else if (signal2_total !== null) {
+      cw1 = 0.40 + monthProgress * 0.35;
+      cw2 = 0.60 - monthProgress * 0.35;
+      cw3 = 0;
+    } else if (signal3_total !== null) {
+      cw1 = 0.60 + monthProgress * 0.20;
+      cw2 = 0;
+      cw3 = 0.40 - monthProgress * 0.20;
+    } else {
+      cw1 = 1.0; cw2 = 0; cw3 = 0;
+    }
+    const cwTotal = cw1 + cw2 + cw3;
+    cw1 /= cwTotal; cw2 /= cwTotal; cw3 /= cwTotal;
+
+    const currentMonthProjected = cw1 * signal1_total
+                                + cw2 * (signal2_total || signal1_total)
+                                + cw3 * (signal3_total || signal1_total);
+
+    // Current month variance
+    const currentSignals = [signal1_total];
+    if (signal2_total !== null) currentSignals.push(signal2_total);
+    if (signal3_total !== null) currentSignals.push(signal3_total);
+    const currentSpread = currentSignals.length > 1
+      ? this.stdDev(currentSignals) / this.average(currentSignals) : 0;
+
+    const baseVariance = this.calculateMonthlyVariance(monthlyData);
+    const currentVariance = daysRemaining > 0
+      ? Math.min(Math.sqrt(Math.pow(baseVariance, 2) + Math.pow(currentSpread * 0.5, 2)) * Math.sqrt(daysRemaining / daysInMonth), 0.5)
+      : 0;
+
+    const currentRemaining = currentMonthProjected - mtdActual;
+
+    // YoY change
     let vsLastYear = null;
     if (lastYearSameMonth && lastYearSameMonth.revenue > 0) {
       vsLastYear = ((currentMonthProjected - lastYearSameMonth.revenue) / lastYearSameMonth.revenue) * 100;
     }
 
-    // Calculate variance for confidence range
-    const variance = this.calculateMonthlyVariance(monthlyData);
-
-    // Next month forecast
+    // ── Next Month: Blended with YoY-heavy weights ──
     let nextMonth = now.getMonth() + 1;
     let nextYear = currentYear;
-    if (nextMonth > 11) {
-      nextMonth = 0;
-      nextYear += 1;
-    }
+    if (nextMonth > 11) { nextMonth = 0; nextYear += 1; }
     const nextMonthName = new Date(nextYear, nextMonth, 1).toLocaleDateString('en-US', { month: 'long' });
 
-    // Find next month from last year for seasonality
     const nextMonthLastYear = monthlyData.find(d => {
       const date = new Date(d.date);
       return date.getFullYear() === nextYear - 1 && date.getMonth() === nextMonth;
     });
 
-    // Use the same logic as daily mode - take the HIGHER of:
-    // 1. Recent monthly average
-    // 2. Last year same month × YoY growth
-    const recentMonthlyAvg = this.getRecentMonthlyAverage(monthlyData);
-    let projectedFromLastYear = avgMonthly;
-    let basedOn = 'Recent monthly average';
-
+    // Next month signals
+    let nm_signal1 = null; // YoY
     if (nextMonthLastYear && nextMonthLastYear.revenue > 0) {
-      const yoyGrowth = this.calculateYoYGrowth(monthlyData);
-      projectedFromLastYear = nextMonthLastYear.revenue * yoyGrowth;
+      const blendedGrowth = this.calculateBlendedYoYGrowth(monthlyData);
+      nm_signal1 = nextMonthLastYear.revenue * blendedGrowth.multiplier;
     }
 
-    // Use the higher of recent trend vs last year + growth
-    let nextMonthProjected;
-    if (recentMonthlyAvg > projectedFromLastYear) {
-      nextMonthProjected = recentMonthlyAvg;
-      basedOn = 'Recent monthly average';
+    let nm_signal2 = null; // MoM trend
+    if (momTrend && momTrend.r2 > 0.3) {
+      nm_signal2 = momTrend.projectedNextMonth;
+    }
+
+    const recentMonthlyAvg = this.getRecentMonthlyAverage(monthlyData);
+    const seasonalIndex = this.calculateSeasonalIndex(monthlyData, nextMonth);
+    const nm_signal3 = recentMonthlyAvg > 0 ? recentMonthlyAvg * seasonalIndex : avgMonthly;
+
+    // Next month adaptive weights
+    let nw1 = 0, nw2 = 0, nw3 = 0;
+    let basedOn = '';
+    if (nm_signal1 !== null && nm_signal2 !== null) {
+      nw1 = 0.45; nw2 = 0.30; nw3 = 0.25;
+      basedOn = 'YoY growth + trajectory + seasonal';
+    } else if (nm_signal1 !== null) {
+      nw1 = 0.55; nw3 = 0.45;
+      basedOn = `${nextMonthName} ${nextYear - 1} + growth`;
+    } else if (nm_signal2 !== null) {
+      nw2 = 0.50; nw3 = 0.50;
+      basedOn = 'Monthly trajectory + seasonal average';
     } else {
-      nextMonthProjected = projectedFromLastYear;
-      basedOn = nextMonthLastYear ? `${nextMonthName} ${nextYear - 1} + growth` : 'Recent average';
+      nw3 = 1.0;
+      basedOn = 'Recent monthly average';
     }
+    const nwTotal = nw1 + nw2 + nw3;
+    nw1 /= nwTotal; nw2 /= nwTotal; nw3 /= nwTotal;
 
-    // Removed for production: LC Forecasting (monthly) next month calculation
+    const nextMonthProjected = nw1 * (nm_signal1 || 0)
+                             + nw2 * (nm_signal2 || 0)
+                             + nw3 * nm_signal3;
 
-    // YTD calculation
+    // Next month variance
+    const nextSignals = [nm_signal3];
+    if (nm_signal1 !== null) nextSignals.push(nm_signal1);
+    if (nm_signal2 !== null) nextSignals.push(nm_signal2);
+    const nextSpread = nextSignals.length > 1
+      ? this.stdDev(nextSignals) / this.average(nextSignals) : 0;
+    const nextVariance = Math.min(
+      Math.sqrt(Math.pow(baseVariance * 1.3, 2) + Math.pow(nextSpread * 0.5, 2)),
+      0.5
+    );
+
+    // ── YTD calculation ──
     const ytdCurrent = monthlyData
       .filter(d => {
         const date = new Date(d.date);
@@ -190,37 +269,61 @@ const LCForecasting = {
       ytdPctChange = ((ytdCurrent - ytdLastYear) / ytdLastYear) * 100;
     }
 
-    // Calculate full year forecast for monthly data
     const fullYearForecast = this.calculateFullYearForecastMonthly(monthlyData, ytdCurrent, ytdLastYear, currentYear);
 
     return {
       currentMonth: {
         name: monthName,
         projected: Math.round(currentMonthProjected),
-        low: Math.round(currentMonthProjected * (1 - variance)),
-        high: Math.round(currentMonthProjected * (1 + variance)),
+        low: Math.round(mtdActual + Math.max(0, currentRemaining) * (1 - currentVariance)),
+        high: Math.round(mtdActual + Math.max(0, currentRemaining) * (1 + currentVariance)),
         mtdActual: Math.round(mtdActual),
-        daysRemaining: daysRemaining,
-        vsLastYear: vsLastYear,
+        daysRemaining,
+        vsLastYear,
         confidence: daysRemaining < 10 ? 'high' : 'medium',
         calcDetails: {
           monthlyAvg: Math.round(avgMonthly),
-          variancePct: Math.round(variance * 100),
-          isMonthlyData: true
+          variancePct: Math.round(currentVariance * 100),
+          isMonthlyData: true,
+          signals: {
+            extrapolation: { value: Math.round(signal1_total), weight: Math.round(cw1 * 100) },
+            seasonalYoY: signal2_total !== null
+              ? { value: Math.round(signal2_total), weight: Math.round(cw2 * 100) }
+              : null,
+            momTrend: signal3_total !== null
+              ? { value: Math.round(signal3_total), weight: Math.round(cw3 * 100) }
+              : null
+          },
+          signalAgreement: currentSignals.length > 1
+            ? (currentSpread < 0.05 ? 'high' : currentSpread < 0.15 ? 'medium' : 'low')
+            : 'single-signal'
         }
       },
       nextMonth: {
         name: nextMonthName,
         year: nextYear,
         projected: Math.round(nextMonthProjected),
-        low: Math.round(nextMonthProjected * (1 - variance * 1.5)),
-        high: Math.round(nextMonthProjected * (1 + variance * 1.5)),
-        basedOn: basedOn,
+        low: Math.round(nextMonthProjected * (1 - nextVariance)),
+        high: Math.round(nextMonthProjected * (1 + nextVariance)),
+        basedOn,
         confidence: 'lower',
         calcDetails: {
           recentMonthlyAvg: Math.round(recentMonthlyAvg),
-          variancePct: Math.round(variance * 1.5 * 100),
-          isMonthlyData: true
+          variancePct: Math.round(nextVariance * 100),
+          isMonthlyData: true,
+          seasonalIndex: Math.round(seasonalIndex * 100) / 100,
+          signals: {
+            seasonalYoY: nm_signal1 !== null
+              ? { value: Math.round(nm_signal1), weight: Math.round(nw1 * 100) }
+              : null,
+            momTrend: nm_signal2 !== null
+              ? { value: Math.round(nm_signal2), weight: Math.round(nw2 * 100) }
+              : null,
+            seasonalAvg: { value: Math.round(nm_signal3), weight: Math.round(nw3 * 100) }
+          },
+          signalAgreement: nextSignals.length > 1
+            ? (nextSpread < 0.05 ? 'high' : nextSpread < 0.15 ? 'medium' : 'low')
+            : 'single-signal'
         }
       },
       ytd: {
@@ -228,11 +331,11 @@ const LCForecasting = {
         lastYear: Math.round(ytdLastYear),
         pctChange: ytdPctChange !== null ? Math.round(ytdPctChange * 10) / 10 : null,
         asOf: now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        currentYear: currentYear,
+        currentYear,
         lastYearLabel: currentYear - 1
       },
       fullYear: fullYearForecast,
-      patterns: null, // Daily patterns don't apply to monthly data
+      patterns: null,
       insight: this.generateMonthlyInsight(monthlyData),
       granularity: 'monthly',
       note: 'Forecasts based on monthly data. For more accurate daily forecasts, view the daily chart.'
@@ -295,10 +398,28 @@ const LCForecasting = {
       projected = monthlyAvg * 12;
     }
 
-    // Range: ±15%
-    const variance = 0.15;
-    const low = projected * (1 - variance);
-    const high = projected * (1 + variance);
+    // Apply variance only to the uncertain remaining portion of the year
+    // Scale variance up as fewer months remain (less averaging of monthly fluctuations)
+    const monthsRemaining = 12 - (currentMonth + 1);
+    const baseVariance = this.calculateMonthlyVariance(monthlyData);
+    const variance = monthsRemaining > 0
+      ? Math.min(baseVariance * Math.sqrt(12 / monthsRemaining), 1.5)
+      : 0;
+    const remainingProjection = Math.max(0, projected - ytdCurrent);
+    const low = ytdCurrent + remainingProjection * (1 - variance);
+    const high = ytdCurrent + remainingProjection * (1 + variance);
+
+    // Build calcDetails for the info tooltip
+    const method = lastYearTotal > 0 ? 'yoy' : 'extrapolation';
+    const calcDetails = { variancePct: Math.round(variance * 100), signals: {} };
+    if (method === 'yoy') {
+      calcDetails.signals.lastYearTotal = { value: Math.round(lastYearTotal), weight: 100, label: 'Last year total' };
+      calcDetails.method = `Last year \u00D7 (1 + ${Math.round(yoyGrowthRate * 100)}% YTD YoY growth)`;
+    } else {
+      calcDetails.signals.ytdExtrapolation = { value: Math.round(projected), weight: 100, label: 'YTD monthly avg \u00D7 12' };
+      calcDetails.method = 'YTD monthly average extrapolated to full year';
+    }
+    calcDetails.signalAgreement = 'single-signal';
 
     return {
       projected: Math.round(projected),
@@ -306,12 +427,19 @@ const LCForecasting = {
       high: Math.round(high),
       lastYearTotal: Math.round(lastYearTotal),
       currentYear,
-      yoyGrowthRate: Math.round(yoyGrowthRate * 100)
+      yoyGrowthRate: Math.round(yoyGrowthRate * 100),
+      calcDetails
     };
   },
 
   /**
    * Forecast current month's final revenue
+   * Uses a weighted blend of 3 signals:
+   *   1. Recent 30-day daily average (always available)
+   *   2. Same month last year x blended YoY growth + MTD pacing (if YoY data exists)
+   *   3. MoM trajectory extrapolation (if linear fit is decent)
+   * Weights adapt based on month progress, data availability, and seasonal consistency.
+   *
    * @param {Array} data - Sorted daily revenue data
    * @returns {Object} Current month forecast
    */
@@ -322,49 +450,151 @@ const LCForecasting = {
     const today = now.getDate();
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
     const daysRemaining = daysInMonth - today;
-
-    // Get month name
+    const monthProgress = today / daysInMonth;
     const monthName = now.toLocaleDateString('en-US', { month: 'long' });
 
-    // Calculate MTD actual from data
+    // ── MTD Actual ──
     const mtdData = data.filter(d => {
       const date = new Date(d.date);
       return date.getFullYear() === currentYear &&
              date.getMonth() === currentMonth &&
              date.getDate() <= today;
     });
-
     const mtdActual = mtdData.reduce((sum, d) => sum + (d.revenue || 0), 0);
 
-    // Use recent daily average to project remaining days
-    // This is more robust than historical day-of-month when we have limited data
-    const recentDailyAvg = this.getRecentDailyAverage(data, 15);
-    const remainingForecast = recentDailyAvg * daysRemaining;
+    // ── Data Availability ──
+    const availability = this.getDataAvailability(data);
 
-    // Project total: MTD actual + remaining days forecast
-    const projected = mtdActual + remainingForecast;
+    // ══════════════════════════════════════════════
+    // SIGNAL 1: Recent Daily Average (30-day window)
+    // ══════════════════════════════════════════════
+    const recentDailyAvg = this.getRecentDailyAverage(data, 30);
+    const signal1_total = mtdActual + recentDailyAvg * daysRemaining;
 
-    // Removed for production: LC Forecasting current month calculation
+    // ══════════════════════════════════════════════
+    // SIGNAL 2: Same Month Last Year x YoY Growth + MTD Pacing
+    // ══════════════════════════════════════════════
+    let signal2_total = null;
+    const lastYearSameMonthTotal = this.getMonthTotal(data, currentMonth, currentYear - 1);
 
-    // Calculate confidence range based on variance
-    const variance = this.calculateMonthlyVariance(data);
-    const low = Math.max(0, projected * (1 - variance));
-    const high = projected * (1 + variance);
+    if (lastYearSameMonthTotal > 0) {
+      const blendedGrowth = this.calculateBlendedYoYGrowth(data);
+      signal2_total = lastYearSameMonthTotal * blendedGrowth.multiplier;
 
-    // Calculate vs last year same month (YoY)
-    const lastYearSameMonth = this.getMonthTotal(data, currentMonth, currentYear - 1);
-    let vsLastYear = null;
-    if (lastYearSameMonth > 0) {
-      vsLastYear = ((projected - lastYearSameMonth) / lastYearSameMonth) * 100;
+      // Refine with MTD pacing comparison once we have enough data (~5+ days)
+      if (monthProgress > 0.15) {
+        const lastYearMTD = data.filter(d => {
+          const date = new Date(d.date);
+          return date.getFullYear() === currentYear - 1 &&
+                 date.getMonth() === currentMonth &&
+                 date.getDate() <= today;
+        }).reduce((sum, d) => sum + (d.revenue || 0), 0);
+
+        if (lastYearMTD > 0) {
+          const pacingRatio = mtdActual / lastYearMTD;
+          const pacingProjection = lastYearSameMonthTotal * pacingRatio;
+          // As month progresses, trust pacing more than pure growth projection
+          signal2_total = signal2_total * (1 - monthProgress) + pacingProjection * monthProgress;
+        }
+      }
     }
 
-    // Calculate vs last month (MoM)
+    // ══════════════════════════════════════════════
+    // SIGNAL 3: MoM Trajectory Extrapolation
+    // ══════════════════════════════════════════════
+    let signal3_total = null;
+    const momTrend = this.calculateMoMTrend(data, 6);
+    if (momTrend && momTrend.r2 > 0.3) {
+      signal3_total = momTrend.projectedCurrentMonth;
+    }
+
+    // ══════════════════════════════════════════════
+    // ADAPTIVE WEIGHT CALCULATION
+    // ══════════════════════════════════════════════
+    let w1, w2, w3;
+
+    if (signal2_total !== null && signal3_total !== null) {
+      // All three signals available
+      w1 = 0.30 + monthProgress * 0.40;  // 0.30 -> 0.70
+      w2 = 0.45 - monthProgress * 0.25;  // 0.45 -> 0.20
+      w3 = 0.25 - monthProgress * 0.15;  // 0.25 -> 0.10
+
+      // Boost seasonal weight if seasonal pattern is consistent
+      const seasonalConsistency = this.calculateSeasonalConsistency(data, currentMonth);
+      if (seasonalConsistency > 0.7) {
+        const boost = 0.10 * seasonalConsistency;
+        w2 += boost;
+        w1 -= boost * 0.6;
+        w3 -= boost * 0.4;
+      }
+
+      // Boost MoM trend if fit is very good
+      if (momTrend.r2 > 0.8) {
+        w3 += 0.05;
+        w1 -= 0.05;
+      }
+    } else if (signal2_total !== null) {
+      w1 = 0.40 + monthProgress * 0.35;
+      w2 = 0.60 - monthProgress * 0.35;
+      w3 = 0;
+    } else if (signal3_total !== null) {
+      w1 = 0.60 + monthProgress * 0.20;
+      w2 = 0;
+      w3 = 0.40 - monthProgress * 0.20;
+    } else {
+      w1 = 1.0;
+      w2 = 0;
+      w3 = 0;
+    }
+
+    // Normalize weights
+    const wTotal = w1 + w2 + w3;
+    w1 /= wTotal;
+    w2 /= wTotal;
+    w3 /= wTotal;
+
+    // ══════════════════════════════════════════════
+    // FINAL BLENDED PROJECTION
+    // ══════════════════════════════════════════════
+    const projected = w1 * signal1_total
+                    + w2 * (signal2_total || signal1_total)
+                    + w3 * (signal3_total || signal1_total);
+
+    // ══════════════════════════════════════════════
+    // IMPROVED VARIANCE / CONFIDENCE BAND
+    // Signal disagreement widens the band; agreement narrows it
+    // ══════════════════════════════════════════════
+    const signalValues = [signal1_total];
+    if (signal2_total !== null) signalValues.push(signal2_total);
+    if (signal3_total !== null) signalValues.push(signal3_total);
+
+    const signalSpread = signalValues.length > 1
+      ? this.stdDev(signalValues) / this.average(signalValues)
+      : 0;
+
+    const baseVariance = this.calculateMonthlyVariance(data);
+    const combinedVariance = Math.sqrt(
+      Math.pow(baseVariance, 2) + Math.pow(signalSpread * 0.5, 2)
+    );
+
+    // Scale by proportion of month remaining (less remaining = less uncertainty)
+    const variance = daysRemaining > 0
+      ? Math.min(combinedVariance * Math.sqrt(daysRemaining / daysInMonth), 0.5)
+      : 0;
+
+    const remainingProjection = projected - mtdActual;
+    const low = Math.max(0, mtdActual + remainingProjection * (1 - variance));
+    const high = mtdActual + remainingProjection * (1 + variance);
+
+    // ── Comparison metrics ──
+    let vsLastYear = null;
+    if (lastYearSameMonthTotal > 0) {
+      vsLastYear = ((projected - lastYearSameMonthTotal) / lastYearSameMonthTotal) * 100;
+    }
+
     let lastMonth = currentMonth - 1;
     let lastMonthYear = currentYear;
-    if (lastMonth < 0) {
-      lastMonth = 11;
-      lastMonthYear = currentYear - 1;
-    }
+    if (lastMonth < 0) { lastMonth = 11; lastMonthYear = currentYear - 1; }
     const lastMonthTotal = this.getMonthTotal(data, lastMonth, lastMonthYear);
     const lastMonthName = new Date(lastMonthYear, lastMonth, 1).toLocaleDateString('en-US', { month: 'long' });
     let vsMoM = null;
@@ -378,23 +608,42 @@ const LCForecasting = {
       low: Math.round(low),
       high: Math.round(high),
       mtdActual: Math.round(mtdActual),
-      daysRemaining: daysRemaining,
+      daysRemaining,
       vsLastYear,
-      lastYearAmount: Math.round(lastYearSameMonth),
+      lastYearAmount: Math.round(lastYearSameMonthTotal),
       vsMoM,
       lastMonthAmount: Math.round(lastMonthTotal),
       lastMonthName,
       confidence: this.getConfidenceLevel(daysRemaining),
-      // Calculation details for tooltip
       calcDetails: {
         dailyAvg: Math.round(recentDailyAvg),
-        variancePct: Math.round(variance * 100)
+        variancePct: Math.round(variance * 100),
+        signals: {
+          recentAvg: { value: Math.round(signal1_total), weight: Math.round(w1 * 100) },
+          seasonalYoY: signal2_total !== null
+            ? { value: Math.round(signal2_total), weight: Math.round(w2 * 100) }
+            : null,
+          momTrend: signal3_total !== null
+            ? { value: Math.round(signal3_total), weight: Math.round(w3 * 100), r2: Math.round(momTrend.r2 * 100) }
+            : null
+        },
+        signalAgreement: signalValues.length > 1
+          ? (signalSpread < 0.05 ? 'high' : signalSpread < 0.15 ? 'medium' : 'low')
+          : 'single-signal',
+        monthProgress: Math.round(monthProgress * 100)
       }
     };
   },
 
   /**
    * Forecast next month's revenue
+   * Uses a weighted blend of 4 signals, prioritizing seasonality and YoY
+   * over recent daily averages (since there's no MTD data for next month):
+   *   1. Same month last year x blended YoY growth (primary)
+   *   2. MoM trajectory extrapolation
+   *   3. Recent monthly average x seasonal index
+   *   4. Recent daily average x days (fallback, lowest weight)
+   *
    * @param {Array} data - Sorted daily revenue data
    * @returns {Object} Next month forecast
    */
@@ -402,46 +651,123 @@ const LCForecasting = {
     const now = new Date();
     let nextMonth = now.getMonth() + 1;
     let nextYear = now.getFullYear();
-
-    if (nextMonth > 11) {
-      nextMonth = 0;
-      nextYear += 1;
-    }
+    if (nextMonth > 11) { nextMonth = 0; nextYear += 1; }
 
     const monthName = new Date(nextYear, nextMonth, 1).toLocaleDateString('en-US', { month: 'long' });
     const daysInNextMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
+    const availability = this.getDataAvailability(data);
 
-    // Primary method: Use recent daily average * days in month
-    // This is more accurate for growing apps than comparing to last year
-    const recentDailyAvg = this.getRecentDailyAverage(data, 15); // Last 15 days (excluding today)
-    const projectedFromRecent = recentDailyAvg * daysInNextMonth;
-
-    // Secondary: Get same month from last year for comparison
+    // ══════════════════════════════════════════════
+    // SIGNAL 1: Same Month Last Year x Blended YoY Growth
+    // Primary signal for next month (strongest differentiator)
+    // ══════════════════════════════════════════════
+    let signal1_total = null;
     const lastYearSameMonth = this.getMonthTotal(data, nextMonth, nextYear - 1);
 
-    // Use the higher of: recent projection or last year + growth
-    let projected = projectedFromRecent;
-    let basedOn = 'Recent 15-day average';
-
     if (lastYearSameMonth > 0) {
-      const yoyGrowth = this.calculateYoYGrowth(data);
-      const projectedFromLastYear = lastYearSameMonth * yoyGrowth;
-
-      // Removed for production: LC Forecasting next month projections
-
-      // Use the higher projection (recent trend usually more relevant for growing apps)
-      if (projectedFromRecent > projectedFromLastYear) {
-        projected = projectedFromRecent;
-        basedOn = 'Recent 15-day average';
-      } else {
-        projected = projectedFromLastYear;
-        basedOn = `${monthName} ${nextYear - 1} + growth`;
-      }
+      const blendedGrowth = this.calculateBlendedYoYGrowth(data);
+      signal1_total = lastYearSameMonth * blendedGrowth.multiplier;
     }
 
-    // Wider confidence range for future month
-    const variance = this.calculateMonthlyVariance(data);
-    const low = projected * (1 - variance);
+    // ══════════════════════════════════════════════
+    // SIGNAL 2: MoM Trajectory Extrapolation
+    // Projects where the monthly revenue curve is heading
+    // ══════════════════════════════════════════════
+    let signal2_total = null;
+    const momTrend = this.calculateMoMTrend(data, 6);
+    if (momTrend && momTrend.r2 > 0.3) {
+      signal2_total = momTrend.projectedNextMonth;
+    }
+
+    // ══════════════════════════════════════════════
+    // SIGNAL 3: Recent Monthly Average x Seasonal Index
+    // Adjusts baseline for seasonal expectations
+    // ══════════════════════════════════════════════
+    const recentMonthlyAvg = this.getRecentMonthlyAverage(data);
+    const seasonalIndex = this.calculateSeasonalIndex(data, nextMonth);
+    const signal3_total = recentMonthlyAvg > 0 ? recentMonthlyAvg * seasonalIndex : 0;
+
+    // ══════════════════════════════════════════════
+    // SIGNAL 4: Recent Daily Average (fallback, least differentiated)
+    // ══════════════════════════════════════════════
+    const recentDailyAvg = this.getRecentDailyAverage(data, 30);
+    const signal4_total = recentDailyAvg * daysInNextMonth;
+
+    // ══════════════════════════════════════════════
+    // ADAPTIVE WEIGHT CALCULATION
+    // Next month: prioritize YoY + seasonal over daily average
+    // ══════════════════════════════════════════════
+    let w1 = 0, w2 = 0, w3 = 0, w4 = 0;
+    let basedOn = '';
+
+    if (signal1_total !== null && signal2_total !== null) {
+      // Best case: have YoY data AND MoM trend
+      w1 = 0.40;
+      w2 = 0.30;
+      w3 = 0.20;
+      w4 = 0.10;
+
+      const seasonalConsistency = this.calculateSeasonalConsistency(data, nextMonth);
+      if (seasonalConsistency > 0.7) {
+        w1 += 0.10;
+        w4 -= 0.05;
+        w3 -= 0.05;
+      }
+      if (momTrend.r2 > 0.8) {
+        w2 += 0.05;
+        w4 -= 0.05;
+      }
+
+      basedOn = 'YoY growth + trajectory + seasonal';
+    } else if (signal1_total !== null) {
+      w1 = 0.50;
+      w3 = 0.30;
+      w4 = 0.20;
+      basedOn = `${monthName} ${nextYear - 1} + growth`;
+    } else if (signal2_total !== null) {
+      w2 = 0.45;
+      w3 = 0.25;
+      w4 = 0.30;
+      basedOn = 'Monthly trajectory + recent average';
+    } else {
+      w3 = availability.hasSeasonalData ? 0.40 : 0;
+      w4 = availability.hasSeasonalData ? 0.60 : 1.0;
+      basedOn = availability.hasSeasonalData
+        ? 'Recent average + seasonal adjustment'
+        : 'Recent daily average';
+    }
+
+    // Normalize
+    const wTotal = w1 + w2 + w3 + w4;
+    w1 /= wTotal; w2 /= wTotal; w3 /= wTotal; w4 /= wTotal;
+
+    // ══════════════════════════════════════════════
+    // FINAL BLENDED PROJECTION
+    // ══════════════════════════════════════════════
+    const projected = w1 * (signal1_total || 0)
+                    + w2 * (signal2_total || 0)
+                    + w3 * signal3_total
+                    + w4 * signal4_total;
+
+    // ══════════════════════════════════════════════
+    // IMPROVED VARIANCE
+    // ══════════════════════════════════════════════
+    const activeSignals = [signal3_total, signal4_total];
+    if (signal1_total !== null) activeSignals.push(signal1_total);
+    if (signal2_total !== null) activeSignals.push(signal2_total);
+
+    const signalSpread = activeSignals.length > 1
+      ? this.stdDev(activeSignals) / this.average(activeSignals)
+      : 0;
+
+    const baseVariance = this.calculateMonthlyVariance(data);
+    const nextMonthPremium = 1.3; // 30% wider than current month baseline
+    const combinedVariance = Math.sqrt(
+      Math.pow(baseVariance * nextMonthPremium, 2) + Math.pow(signalSpread * 0.5, 2)
+    );
+    const variance = Math.min(combinedVariance, 0.5);
+
+    const low = Math.max(0, projected * (1 - variance));
     const high = projected * (1 + variance);
 
     return {
@@ -450,13 +776,26 @@ const LCForecasting = {
       projected: Math.round(projected),
       low: Math.round(low),
       high: Math.round(high),
-      basedOn: basedOn,
-      confidence: 'lower', // Next month always lower confidence
-      // Calculation details for tooltip
+      basedOn,
+      confidence: 'lower',
       calcDetails: {
         dailyAvg: Math.round(recentDailyAvg),
         daysInMonth: daysInNextMonth,
-        variancePct: Math.round(variance * 100)
+        variancePct: Math.round(variance * 100),
+        seasonalIndex: Math.round(seasonalIndex * 100) / 100,
+        signals: {
+          seasonalYoY: signal1_total !== null
+            ? { value: Math.round(signal1_total), weight: Math.round(w1 * 100) }
+            : null,
+          momTrend: signal2_total !== null
+            ? { value: Math.round(signal2_total), weight: Math.round(w2 * 100), r2: Math.round(momTrend.r2 * 100) }
+            : null,
+          seasonalAvg: { value: Math.round(signal3_total), weight: Math.round(w3 * 100) },
+          recentDaily: { value: Math.round(signal4_total), weight: Math.round(w4 * 100) }
+        },
+        signalAgreement: activeSignals.length > 1
+          ? (signalSpread < 0.05 ? 'high' : signalSpread < 0.15 ? 'medium' : 'low')
+          : 'single-signal'
       }
     };
   },
@@ -515,10 +854,31 @@ const LCForecasting = {
       projected = dailyAvg * 365;
     }
 
-    // Range: ±15%
-    const variance = 0.15;
-    const low = projected * (1 - variance);
-    const high = projected * (1 + variance);
+    // Apply variance only to the uncertain remaining portion of the year
+    // Scale variance up as fewer months remain (less averaging of monthly fluctuations)
+    const startOfYear = new Date(currentYear, 0, 1);
+    const daysPassed = Math.floor((now - startOfYear) / (1000 * 60 * 60 * 24)) + 1;
+    const daysInYear = ((currentYear % 4 === 0 && currentYear % 100 !== 0) || currentYear % 400 === 0) ? 366 : 365;
+    const daysLeft = daysInYear - daysPassed;
+    const baseVariance = this.calculateMonthlyVariance(data);
+    const variance = daysLeft > 0
+      ? Math.min(baseVariance * Math.sqrt(daysInYear / daysLeft), 1.5)
+      : 0;
+    const remainingProjection = Math.max(0, projected - ytdCurrent);
+    const low = ytdCurrent + remainingProjection * (1 - variance);
+    const high = ytdCurrent + remainingProjection * (1 + variance);
+
+    // Build calcDetails for the info tooltip
+    const method = lastYearTotal > 0 ? 'yoy' : 'extrapolation';
+    const calcDetails = { variancePct: Math.round(variance * 100), signals: {} };
+    if (method === 'yoy') {
+      calcDetails.signals.lastYearTotal = { value: Math.round(lastYearTotal), weight: 100, label: 'Last year total' };
+      calcDetails.method = `Last year \u00D7 (1 + ${Math.round(yoyGrowthRate * 100)}% YTD YoY growth)`;
+    } else {
+      calcDetails.signals.ytdExtrapolation = { value: Math.round(projected), weight: 100, label: 'YTD daily avg \u00D7 365' };
+      calcDetails.method = 'YTD daily average extrapolated to full year';
+    }
+    calcDetails.signalAgreement = 'single-signal';
 
     return {
       projected: Math.round(projected),
@@ -526,7 +886,8 @@ const LCForecasting = {
       high: Math.round(high),
       lastYearTotal: Math.round(lastYearTotal),
       currentYear,
-      yoyGrowthRate: Math.round(yoyGrowthRate * 100)
+      yoyGrowthRate: Math.round(yoyGrowthRate * 100),
+      calcDetails
     };
   },
 
@@ -664,6 +1025,257 @@ const LCForecasting = {
   // Helper Methods
   // ============================================
 
+  // ── Forecasting Signal Helpers ──
+
+  /**
+   * Calculate the seasonal index for a given month.
+   * Returns a multiplier relative to the annual average month.
+   * e.g., 1.3 means this month typically does 30% above average.
+   * Uses complete prior calendar years only.
+   *
+   * @param {Array} data - Sorted daily revenue data
+   * @param {number} targetMonth - Month index (0-11)
+   * @returns {number} Seasonal index (1.0 = average)
+   */
+  calculateSeasonalIndex(data, targetMonth) {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+
+    // Build yearly data: { year: { months: {0: total, ...}, yearTotal } }
+    const yearlyData = {};
+    data.forEach(d => {
+      const date = new Date(d.date);
+      const year = date.getFullYear();
+      const month = date.getMonth();
+      if (!yearlyData[year]) yearlyData[year] = { months: {}, yearTotal: 0 };
+      if (!yearlyData[year].months[month]) yearlyData[year].months[month] = 0;
+      yearlyData[year].months[month] += (d.revenue || 0);
+      yearlyData[year].yearTotal += (d.revenue || 0);
+    });
+
+    // Only use years with target month data, 10+ months of data, and not current year
+    const usableYears = Object.keys(yearlyData).filter(year => {
+      const y = parseInt(year);
+      const monthCount = Object.keys(yearlyData[y].months).length;
+      return yearlyData[y].months[targetMonth] !== undefined &&
+             monthCount >= 10 && y !== currentYear;
+    });
+
+    if (usableYears.length === 0) return 1.0;
+
+    const indices = usableYears.map(year => {
+      const y = parseInt(year);
+      const monthRevenue = yearlyData[y].months[targetMonth];
+      const avgMonth = yearlyData[y].yearTotal / 12;
+      return avgMonth > 0 ? monthRevenue / avgMonth : 1.0;
+    });
+
+    return this.average(indices);
+  },
+
+  /**
+   * Calculate YoY growth rate using only the most recent N months
+   * compared to the same N months one year prior.
+   * More responsive than the full 12-month version.
+   *
+   * @param {Array} data - Sorted daily revenue data
+   * @param {number} monthsBack - Number of recent months to use (3 or 6)
+   * @returns {number|null} Growth multiplier, or null if insufficient data
+   */
+  calculateRecentYoYGrowthRate(data, monthsBack) {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+
+    let recentTotal = 0;
+    let priorTotal = 0;
+    let recentMonthsWithData = 0;
+    let priorMonthsWithData = 0;
+
+    for (let i = 1; i <= monthsBack; i++) {
+      const targetDate = new Date(currentYear, currentMonth - i, 1);
+      const recentMonth = targetDate.getMonth();
+      const recentYear = targetDate.getFullYear();
+
+      const recentMonthTotal = this.getMonthTotal(data, recentMonth, recentYear);
+      const priorMonthTotal = this.getMonthTotal(data, recentMonth, recentYear - 1);
+
+      if (recentMonthTotal > 0) {
+        recentTotal += recentMonthTotal;
+        recentMonthsWithData++;
+      }
+      if (priorMonthTotal > 0) {
+        priorTotal += priorMonthTotal;
+        priorMonthsWithData++;
+      }
+    }
+
+    const minMonths = Math.ceil(monthsBack / 2);
+    if (recentMonthsWithData < minMonths || priorMonthsWithData < minMonths) {
+      return null;
+    }
+
+    // Normalize to per-month average to handle partial data
+    const recentAvg = recentTotal / recentMonthsWithData;
+    const priorAvg = priorTotal / priorMonthsWithData;
+
+    return priorAvg > 0 ? recentAvg / priorAvg : null;
+  },
+
+  /**
+   * Calculate a blended YoY growth multiplier.
+   * Weights the 3-month rate (responsive) and 6-month rate (stable).
+   * Falls back to the full 12-month rate if both are unavailable.
+   *
+   * @param {Array} data - Sorted daily revenue data
+   * @returns {{multiplier: number, confidence: string}}
+   */
+  calculateBlendedYoYGrowth(data) {
+    const rate3mo = this.calculateRecentYoYGrowthRate(data, 3);
+    const rate6mo = this.calculateRecentYoYGrowthRate(data, 6);
+    const rate12mo = this.calculateYoYGrowth(data); // existing method
+
+    if (rate3mo !== null && rate6mo !== null) {
+      return {
+        multiplier: rate3mo * 0.6 + rate6mo * 0.4,
+        confidence: 'high'
+      };
+    }
+    if (rate6mo !== null) return { multiplier: rate6mo, confidence: 'medium' };
+    if (rate3mo !== null) return { multiplier: rate3mo, confidence: 'medium' };
+    return { multiplier: rate12mo, confidence: 'low' };
+  },
+
+  /**
+   * Calculate month-over-month growth trajectory using linear regression.
+   * Projects current and next month totals based on the trend.
+   *
+   * @param {Array} data - Sorted daily revenue data
+   * @param {number} monthsBack - Number of months to look back (default 6)
+   * @returns {{projectedCurrentMonth: number, projectedNextMonth: number, slope: number, r2: number}|null}
+   */
+  calculateMoMTrend(data, monthsBack = 6) {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+
+    const monthlyTotals = [];
+    for (let i = monthsBack; i >= 1; i--) {
+      const targetDate = new Date(currentYear, currentMonth - i, 1);
+      const total = this.getMonthTotal(data, targetDate.getMonth(), targetDate.getFullYear());
+      if (total > 0) monthlyTotals.push(total);
+    }
+
+    if (monthlyTotals.length < 3) return null;
+
+    // Simple linear regression: y = intercept + slope * x
+    const n = monthlyTotals.length;
+    const xs = monthlyTotals.map((_, i) => i);
+    const ys = monthlyTotals;
+
+    const sumX = xs.reduce((s, x) => s + x, 0);
+    const sumY = ys.reduce((s, y) => s + y, 0);
+    const sumXY = xs.reduce((s, x, i) => s + x * ys[i], 0);
+    const sumX2 = xs.reduce((s, x) => s + x * x, 0);
+
+    const denom = n * sumX2 - sumX * sumX;
+    if (denom === 0) return null;
+
+    const slope = (n * sumXY - sumX * sumY) / denom;
+    const intercept = (sumY - slope * sumX) / n;
+
+    // R-squared
+    const yMean = sumY / n;
+    const ssRes = ys.reduce((s, y, i) => s + Math.pow(y - (intercept + slope * i), 2), 0);
+    const ssTot = ys.reduce((s, y) => s + Math.pow(y - yMean, 2), 0);
+    const r2 = ssTot > 0 ? 1 - ssRes / ssTot : 0;
+
+    return {
+      projectedCurrentMonth: Math.max(0, intercept + slope * n),
+      projectedNextMonth: Math.max(0, intercept + slope * (n + 1)),
+      slope,
+      r2,
+      monthCount: n
+    };
+  },
+
+  /**
+   * Assess what historical data is available for forecasting.
+   * Drives adaptive weight selection.
+   *
+   * @param {Array} data - Sorted daily revenue data
+   * @returns {Object} Availability flags and metrics
+   */
+  getDataAvailability(data) {
+    if (!data || data.length === 0) {
+      return { totalDays: 0, hasLastYear: false, hasSeasonalData: false, monthsOfData: 0 };
+    }
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+
+    const firstDate = new Date(data[0].date);
+    const lastDate = new Date(data[data.length - 1].date);
+    const totalDays = Math.ceil((lastDate - firstDate) / (1000 * 60 * 60 * 24));
+    const monthsOfData = Math.floor(totalDays / 30);
+
+    const hasLastYear = this.getMonthTotal(data, currentMonth, currentYear - 1) > 0;
+    const hasSeasonalData = totalDays >= 365;
+
+    let nextMonth = currentMonth + 1;
+    let nextMonthYear = currentYear;
+    if (nextMonth > 11) { nextMonth = 0; nextMonthYear++; }
+    const hasNextMonthLastYear = this.getMonthTotal(data, nextMonth, nextMonthYear - 1) > 0;
+
+    return { totalDays, monthsOfData, hasLastYear, hasNextMonthLastYear, hasSeasonalData };
+  },
+
+  /**
+   * Measure how consistent the seasonal pattern is for a given month.
+   * Returns a value from 0 (inconsistent) to 1 (highly consistent).
+   *
+   * @param {Array} data - Sorted daily revenue data
+   * @param {number} targetMonth - Month index (0-11)
+   * @returns {number} Consistency score (0-1)
+   */
+  calculateSeasonalConsistency(data, targetMonth) {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const yearlyData = {};
+
+    data.forEach(d => {
+      const date = new Date(d.date);
+      const year = date.getFullYear();
+      const month = date.getMonth();
+      if (!yearlyData[year]) yearlyData[year] = { months: {}, yearTotal: 0 };
+      if (!yearlyData[year].months[month]) yearlyData[year].months[month] = 0;
+      yearlyData[year].months[month] += (d.revenue || 0);
+      yearlyData[year].yearTotal += (d.revenue || 0);
+    });
+
+    const indices = [];
+    Object.keys(yearlyData).forEach(year => {
+      const y = parseInt(year);
+      if (y === currentYear) return;
+      const monthCount = Object.keys(yearlyData[y].months).length;
+      if (monthCount < 10 || !yearlyData[y].months[targetMonth]) return;
+      const avgMonth = yearlyData[y].yearTotal / 12;
+      if (avgMonth > 0) indices.push(yearlyData[y].months[targetMonth] / avgMonth);
+    });
+
+    if (indices.length < 2) return 0;
+
+    const avg = this.average(indices);
+    const sd = this.stdDev(indices);
+    const cv = avg > 0 ? sd / avg : 1;
+
+    // CV of 0 = perfect consistency (score 1.0), CV >= 0.5 = score ~0
+    return Math.max(0, Math.min(1, 1 - cv * 2));
+  },
+
+  // ── End Forecasting Signal Helpers ──
+
   /**
    * Get historical average for a specific day of month
    */
@@ -786,8 +1398,8 @@ const LCForecasting = {
     const monthlyTotals = [];
     const now = new Date();
 
-    // Use last 6 months for variance calculation (more responsive to recent changes)
-    for (let i = 1; i <= 6; i++) {
+    // Use last 3 months for variance calculation (more responsive to recent changes)
+    for (let i = 1; i <= 3; i++) {
       const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const total = this.getMonthTotal(data, targetDate.getMonth(), targetDate.getFullYear());
       if (total > 0) {

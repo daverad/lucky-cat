@@ -80,6 +80,185 @@ const LCUIInjector = {
         this.showForecastView();
       });
     }
+
+    // Info tooltips on forecast cards
+    this.setupInfoTooltips();
+  },
+
+  /**
+   * Human-readable labels for each signal key
+   */
+  signalLabels: {
+    recentAvg: 'Recent 30-day avg',
+    extrapolation: 'Recent avg extrapolation',
+    seasonalYoY: 'YoY growth-adjusted',
+    momTrend: 'Monthly trajectory',
+    seasonalAvg: 'Seasonal average',
+    recentDaily: 'Recent daily avg',
+    lastYearTotal: 'Last year total',
+    ytdExtrapolation: 'YTD extrapolation'
+  },
+
+  /**
+   * Build the explanation paragraph for a given forecast type
+   */
+  buildTooltipDescription(calcDetails, type) {
+    if (type === 'current') {
+      const progress = calcDetails.monthProgress || 0;
+      const activeCount = Object.values(calcDetails.signals || {}).filter(s => s).length;
+      let desc = 'This forecast blends up to three signals: your <strong>recent 30-day daily average</strong> extrapolated over the remaining days, ';
+      desc += '<strong>same month last year</strong> adjusted for year-over-year growth trends, ';
+      desc += 'and the <strong>monthly trajectory</strong> based on linear regression of recent months.';
+      desc += ` The weights adapt as the month progresses\u2014right now you're ${progress}% through the month, so `;
+      if (progress < 40) {
+        desc += 'historical patterns carry more weight since there\'s limited actual data.';
+      } else if (progress < 70) {
+        desc += 'the blend is roughly even between actual performance and historical patterns.';
+      } else {
+        desc += 'actual month-to-date performance dominates since there\'s less to predict.';
+      }
+      if (activeCount === 1) {
+        desc += ' Only one signal is available for this app, so it\'s used exclusively.';
+      }
+      return desc;
+    }
+
+    if (type === 'next') {
+      const seasonalIndex = calcDetails.seasonalIndex;
+      let desc = 'Since there\'s no month-to-date data yet, this forecast relies more heavily on <strong>historical patterns</strong> than recent averages. ';
+      desc += 'It blends <strong>year-over-year growth</strong> (same month last year adjusted for recent growth trends), ';
+      desc += '<strong>monthly trajectory</strong> (where your revenue trend is heading), ';
+      desc += 'a <strong>seasonal average</strong> (recent monthly revenue adjusted for seasonal patterns), ';
+      desc += 'and your <strong>recent daily average</strong> as a baseline.';
+      if (seasonalIndex && seasonalIndex !== 1) {
+        const pct = Math.round((seasonalIndex - 1) * 100);
+        if (pct > 0) {
+          desc += ` The seasonal index for this month is ${seasonalIndex}\u00D7, meaning it historically runs ${pct}% above average.`;
+        } else if (pct < 0) {
+          desc += ` The seasonal index for this month is ${seasonalIndex}\u00D7, meaning it historically runs ${Math.abs(pct)}% below average.`;
+        }
+      }
+      return desc;
+    }
+
+    if (type === 'yearly') {
+      const signals = calcDetails.signals || {};
+      if (signals.lastYearTotal) {
+        const lastYear = RCPFormat.currency(signals.lastYearTotal.value);
+        // Extract the YoY rate from the method string
+        const match = (calcDetails.method || '').match(/(\d+)%/);
+        const rate = match ? match[1] : '?';
+        let desc = `This takes last year's full-year revenue of <strong>${lastYear}</strong> and applies your <strong>current year-to-date YoY growth rate of ${rate}%</strong>. `;
+        desc += 'That growth rate isn\'t a fixed number\u2014it\'s calculated by comparing your revenue so far this year to the same period last year. ';
+        desc += 'As the year progresses and more data comes in, this rate will update automatically to reflect your actual performance trajectory.';
+        return desc;
+      } else {
+        let desc = 'With no prior year data available, this forecast takes your <strong>year-to-date daily average</strong> and extrapolates it across the full year. ';
+        desc += 'As more months of data accumulate, the projection will become more stable.';
+        return desc;
+      }
+    }
+
+    return '';
+  },
+
+  /**
+   * Build tooltip HTML from signal data with descriptive text and inline weights
+   */
+  buildTooltipHTML(calcDetails, type) {
+    const signals = calcDetails && calcDetails.signals;
+    if (!signals) return '<div class="lc-tooltip-note">No signal data available</div>';
+
+    // Description paragraph
+    const description = this.buildTooltipDescription(calcDetails, type);
+    let html = description ? `<div class="lc-tooltip-desc">${description}</div>` : '';
+
+    // Signal breakdown
+    const signalEntries = Object.entries(signals).filter(([, s]) => s);
+    if (signalEntries.length > 0) {
+      html += '<div class="lc-tooltip-signals-section">';
+      if (type !== 'yearly') {
+        html += '<div class="lc-tooltip-signals-title">Signal breakdown</div>';
+      }
+      for (const [key, signal] of signalEntries) {
+        const label = signal.label || this.signalLabels[key] || key;
+        const value = RCPFormat.currency(signal.value);
+        const weight = signal.weight;
+        html += `<div class="lc-tooltip-signal-row">` +
+          `<span class="lc-tooltip-signal-label">${label} <span class="lc-tooltip-signal-weight">(${weight}%)</span></span>` +
+          `<span class="lc-tooltip-signal-value">${value}</span>` +
+          `</div>`;
+      }
+      html += '</div>';
+    }
+
+    // Signal agreement footer
+    const agreement = calcDetails.signalAgreement || 'unknown';
+    if (agreement !== 'unknown' && agreement !== 'single-signal') {
+      const agreementLabel = agreement === 'high' ? 'High' : agreement === 'medium' ? 'Medium' : 'Low';
+      const agreementDesc = agreement === 'high'
+        ? 'all signals point to a similar number, so the range is narrow'
+        : agreement === 'medium'
+          ? 'signals show some variation, producing a moderate range'
+          : 'signals disagree significantly, so the range is wider';
+      html += `<div class="lc-tooltip-footer">Signal agreement: <strong>${agreementLabel}</strong>\u2014${agreementDesc}.</div>`;
+    }
+
+    return html;
+  },
+
+  /**
+   * Setup hover/click tooltips on the info icons in forecast card headers
+   */
+  setupInfoTooltips() {
+    if (!this.forecastPanel || !this.cachedForecasts) return;
+
+    const forecasts = this.cachedForecasts;
+
+    const dismissAll = () => {
+      this.forecastPanel.querySelectorAll('.lc-info-tooltip').forEach(t => t.remove());
+    };
+
+    const icons = this.forecastPanel.querySelectorAll('.lc-info-icon[data-lc-tooltip]');
+    icons.forEach(icon => {
+      const key = icon.getAttribute('data-lc-tooltip');
+      let forecastData;
+      if (key === 'current') forecastData = forecasts.currentMonth;
+      else if (key === 'next') forecastData = forecasts.nextMonth;
+      else if (key === 'yearly') forecastData = forecasts.fullYear;
+      else return;
+      if (!forecastData || !forecastData.calcDetails) return;
+
+      icon.addEventListener('click', (e) => {
+        e.stopPropagation();
+
+        // If this icon already has a tooltip open, close it
+        const forecastItem = icon.closest('.lc-forecast-item');
+        const existing = forecastItem && forecastItem.querySelector('.lc-info-tooltip');
+        if (existing) {
+          existing.remove();
+          return;
+        }
+
+        // Dismiss any other open tooltips
+        dismissAll();
+
+        const tooltip = document.createElement('div');
+        tooltip.className = 'lc-info-tooltip';
+        tooltip.innerHTML = this.buildTooltipHTML(forecastData.calcDetails, key);
+
+        if (forecastItem) {
+          forecastItem.appendChild(tooltip);
+        }
+      });
+    });
+
+    // Dismiss tooltips when clicking elsewhere in the panel
+    this.forecastPanel.addEventListener('click', (e) => {
+      if (!e.target.closest('.lc-info-icon')) {
+        dismissAll();
+      }
+    });
   },
 
   /**
@@ -141,14 +320,6 @@ const LCUIInjector = {
           <span id="lc-cache-status" class="lc-status-text"></span>
         </div>
 
-        <div class="lc-settings-section lc-calc-info">
-          <div class="lc-settings-label">How forecasts are calculated</div>
-          <div class="lc-calc-explanation">
-            <p><strong>Current month:</strong> Takes your daily average from the last 15 days (excluding today) and multiplies by remaining days, then adds your actual revenue so far.</p>
-            <p><strong>Next month:</strong> Uses the higher of your recent 15-day average or last year's same month adjusted for growth.</p>
-            <p><strong>Range:</strong> Based on historical variance in your monthly revenue, or your selected variance setting.</p>
-          </div>
-        </div>
       </div>
 
       <div class="lc-panel-footer">
@@ -224,7 +395,8 @@ const LCUIInjector = {
         });
 
         // Redirect to revenue chart
-        const REVENUE_CHART_URL = 'https://app.revenuecat.com/charts/revenue?range=All+time&resolution=0&chart_type=Stacked+area';
+        const today = new Date().toISOString().split('T')[0];
+        const REVENUE_CHART_URL = `https://app.revenuecat.com/charts/revenue?range=All+time%3A%3A${today}&resolution=day&chart_type=stacked_area`;
         const pageType = LCDOMParser?.detectPageType();
 
         if (pageType === 'charts-revenue') {
@@ -289,6 +461,7 @@ const LCUIInjector = {
         <!-- Current Month Forecast -->
         <div class="lc-forecast-item">
           <div class="lc-metric-label">${forecasts.currentMonth.name} ${currentYear} Forecast</div>
+          <span class="lc-info-icon" data-lc-tooltip="current"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 7v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="5" r="0.75" fill="currentColor"/></svg></span>
           <div class="lc-metric">${RCPFormat.currency(currentMonthValue)}</div>
           <div class="lc-forecast-range">
             Range: ${RCPFormat.currencyRange(forecasts.currentMonth.low, forecasts.currentMonth.high)}
@@ -321,6 +494,7 @@ const LCUIInjector = {
         <!-- Next Month Forecast -->
         <div class="lc-forecast-item">
           <div class="lc-metric-label">${forecasts.nextMonth.name} ${forecasts.nextMonth.year} Forecast</div>
+          <span class="lc-info-icon" data-lc-tooltip="next"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 7v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="5" r="0.75" fill="currentColor"/></svg></span>
           <div class="lc-metric">${RCPFormat.currency(nextMonthValue)}</div>
           <div class="lc-forecast-range">
             Range: ${RCPFormat.currencyRange(forecasts.nextMonth.low, forecasts.nextMonth.high)}
@@ -353,6 +527,7 @@ const LCUIInjector = {
         ${forecasts.fullYear ? `
         <div class="lc-forecast-item">
           <div class="lc-metric-label">${currentYear} Full Year Forecast</div>
+          <span class="lc-info-icon" data-lc-tooltip="yearly"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 7v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="5" r="0.75" fill="currentColor"/></svg></span>
           <div class="lc-metric">${RCPFormat.currency(forecasts.fullYear.projected)}</div>
           <div class="lc-forecast-range">
             Range: ${RCPFormat.currencyRange(forecasts.fullYear.low, forecasts.fullYear.high)}
@@ -420,6 +595,7 @@ const LCUIInjector = {
         <!-- Current Month Forecast -->
         <div class="lc-forecast-item">
           <div class="lc-metric-label">${forecasts.currentMonth.name} ${currentYear} Forecast</div>
+          <span class="lc-info-icon" data-lc-tooltip="current"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 7v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="5" r="0.75" fill="currentColor"/></svg></span>
           <div class="lc-metric">${RCPFormat.currency(currentMonthValue)}</div>
           <div class="lc-forecast-range">
             Range: ${RCPFormat.currencyRange(forecasts.currentMonth.low, forecasts.currentMonth.high)}
@@ -452,6 +628,7 @@ const LCUIInjector = {
         <!-- Next Month Forecast -->
         <div class="lc-forecast-item">
           <div class="lc-metric-label">${forecasts.nextMonth.name} ${forecasts.nextMonth.year} Forecast</div>
+          <span class="lc-info-icon" data-lc-tooltip="next"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 7v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="5" r="0.75" fill="currentColor"/></svg></span>
           <div class="lc-metric">${RCPFormat.currency(nextMonthValue)}</div>
           <div class="lc-forecast-range">
             Range: ${RCPFormat.currencyRange(forecasts.nextMonth.low, forecasts.nextMonth.high)}
@@ -484,6 +661,7 @@ const LCUIInjector = {
         ${forecasts.fullYear ? `
         <div class="lc-forecast-item">
           <div class="lc-metric-label">${currentYear} Full Year Forecast</div>
+          <span class="lc-info-icon" data-lc-tooltip="yearly"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M8 7v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="5" r="0.75" fill="currentColor"/></svg></span>
           <div class="lc-metric">${RCPFormat.currency(forecasts.fullYear.projected)}</div>
           <div class="lc-forecast-range">
             Range: ${RCPFormat.currencyRange(forecasts.fullYear.low, forecasts.fullYear.high)}
@@ -514,7 +692,8 @@ const LCUIInjector = {
   showNavigationPrompt() {
     this.removeForecastPanel();
 
-    const revenueChartUrl = 'https://app.revenuecat.com/charts/revenue?range=All+time&resolution=0&chart_type=Stacked+area';
+    const today = new Date().toISOString().split('T')[0];
+    const revenueChartUrl = `https://app.revenuecat.com/charts/revenue?range=All+time%3A%3A${today}&resolution=day&chart_type=stacked_area`;
 
     const panel = document.createElement('div');
     panel.className = 'lc-forecast-panel lc-card';
@@ -867,7 +1046,7 @@ const LCUIInjector = {
         if (projectId) {
           RCPStorage.clearRevenueHistory(projectId).then(() => {
             // Trigger toggle sidebar to initiate fresh data gathering
-            chrome.runtime.sendMessage({ type: 'TOGGLE_SIDEBAR' });
+            window.dispatchEvent(new CustomEvent('luckyCatToggleSidebar'));
           });
         }
       });
@@ -1144,8 +1323,20 @@ const LCUIInjector = {
     button.title = 'Toggle Lucky Cat Forecast Panel';
     button.setAttribute('aria-disabled', 'false');
 
+    // Copy inline styles from the reference button so colors match exactly
+    const refStyles = window.getComputedStyle(referenceButton);
+    button.style.color = refStyles.color;
+    button.style.backgroundColor = refStyles.backgroundColor;
+    button.style.borderColor = refStyles.borderColor;
+
+    // Grab the icon wrapper class from the reference button's icon span (if it has one)
+    const refIconSpan = referenceButton.querySelector('.MuiButton-startIcon, .MuiButton-icon');
+    const iconSpanClass = refIconSpan
+      ? refIconSpan.className
+      : 'MuiButton-icon MuiButton-startIcon MuiButton-iconSizeMedium';
+
     button.innerHTML = `
-      <span class="MuiButton-icon MuiButton-startIcon MuiButton-iconSizeMedium css-lds0xd">
+      <span class="${iconSpanClass}">
         ${this.catIconSVG}
       </span>Lucky Cat
     `;

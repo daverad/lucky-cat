@@ -7,11 +7,14 @@
   'use strict';
 
   // Constants
-  // Try multiple URL formats since RevenueCat may change parameter names/values
+  // Build revenue chart URL with today's date to cap the range at today
+  function buildRevenueChartUrl() {
+    const today = new Date().toISOString().split('T')[0];
+    return `https://app.revenuecat.com/charts/revenue?range=All+time%3A%3A${today}&resolution=day&chart_type=stacked_area`;
+  }
   const REVENUE_CHART_URLS = [
-    'https://app.revenuecat.com/charts/revenue?range=allTime&resolution=day&chart_type=stacked_area',
-    'https://app.revenuecat.com/charts/revenue?range=all_time&resolution=daily&chart_type=stacked_area',
-    'https://app.revenuecat.com/charts/revenue?range=All+time&resolution=0&chart_type=Stacked+area'
+    buildRevenueChartUrl(),
+    'https://app.revenuecat.com/charts/revenue?range=All+time&resolution=day&chart_type=stacked_area'
   ];
   const REVENUE_CHART_URL = REVENUE_CHART_URLS[0];
   const CACHE_FRESHNESS_MS = 12 * 60 * 60 * 1000; // 12 hours

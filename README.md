@@ -42,7 +42,7 @@ When viewing Attribution > Keywords, Lucky Cat can add Spend and ROI columns by 
 Click the extension icon and then the gear icon to access settings:
 
 - **Forecasting**: Enable/disable the forecast panel
-- **Confidence Range**: Conservative, Standard, or Aggressive forecast ranges
+- **Confidence Range**: Auto (calculated from last 3 months), or manual override (±10% to ±50%)
 - **ASA Integration**: Configure Apple Search Ads credentials
 - **Cache Duration**: How long to cache data (1 hour to 7 days)
 
@@ -50,15 +50,19 @@ Click the extension icon and then the gear icon to access settings:
 
 ### Current Month Projection
 - Uses month-to-date actual revenue
-- Adds forecasted revenue for remaining days based on:
-  - Historical average for each day-of-month
-  - Year-over-year growth adjustment
-- Confidence range based on historical variance
+- Adds forecasted revenue for remaining days based on recent 15-day daily average
+- Confidence range applies variance only to the uncertain remaining days (not the known actual), so the range naturally narrows as the month progresses
+- Variance is calculated from the last 3 months of actual store data (stdDev / average), making it specific to each store's volatility
+- As days remaining decrease, per-day variance scales up (sqrt scaling) to account for daily spikes like compressed subscription renewals at end of shorter months
 
 ### Next Month Projection
-- Based on same month from previous year
-- Adjusted for year-over-year growth trend
-- Wider confidence range due to longer forecast horizon
+- Uses the higher of: recent 15-day daily average extrapolated, or same month last year adjusted for YoY growth
+- Full variance applied since the entire month is uncertain
+
+### Full Year Projection
+- Projects full year as last year's total adjusted by YTD year-over-year growth rate
+- Variance applies only to the remaining projected portion, using the store's actual calculated variance
+- Range narrows as more of the year's actual data is known
 
 ### Year-over-Year Comparison
 - Compares YTD revenue vs same period last year

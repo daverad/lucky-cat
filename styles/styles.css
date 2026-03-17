@@ -198,6 +198,7 @@
 }
 
 .lc-forecast-item {
+  position: relative;
   padding: var(--lc-spacing-md);
   background: var(--lc-bg-secondary);
   border-radius: var(--lc-radius-md);
@@ -405,6 +406,115 @@
   color: var(--lc-text-secondary);
   margin-bottom: var(--lc-spacing-xs);
   font-weight: 500;
+}
+
+/* Info icon in forecast card headers — positioned top-right */
+.lc-info-icon {
+  position: absolute;
+  top: var(--lc-spacing-md);
+  right: var(--lc-spacing-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--lc-text-secondary);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity var(--lc-transition-fast);
+}
+
+.lc-info-icon:hover {
+  opacity: 1;
+}
+
+/* Tooltip popup for calculation method */
+.lc-info-tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: var(--lc-bg-tertiary);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-radius-md);
+  padding: var(--lc-spacing-sm) var(--lc-spacing-md);
+  font-size: var(--lc-font-size-xs);
+  color: var(--lc-text-secondary);
+  line-height: 1.4;
+  z-index: 10;
+  box-shadow: var(--lc-shadow-md);
+  animation: lc-tooltip-fade 150ms ease;
+}
+
+@keyframes lc-tooltip-fade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Tooltip description text */
+.lc-tooltip-desc {
+  color: var(--lc-text-secondary);
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.lc-tooltip-desc strong {
+  color: var(--lc-text-primary);
+  font-weight: 600;
+}
+
+/* Signal breakdown section */
+.lc-tooltip-signals-section {
+  border-top: 1px solid var(--lc-border);
+  padding-top: 8px;
+}
+
+.lc-tooltip-signals-title {
+  color: var(--lc-text-tertiary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+/* Signal row — label + value on one line */
+.lc-tooltip-signal-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 3px 0;
+}
+
+.lc-tooltip-signal-label {
+  color: var(--lc-text-secondary);
+}
+
+.lc-tooltip-signal-weight {
+  color: var(--lc-text-tertiary);
+}
+
+.lc-tooltip-signal-value {
+  color: var(--lc-text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Footer showing signal agreement */
+.lc-tooltip-footer {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--lc-border);
+  color: var(--lc-text-tertiary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.lc-tooltip-footer strong {
+  color: var(--lc-text-secondary);
+}
+
+.lc-tooltip-note {
+  color: var(--lc-text-tertiary);
 }
 
 .lc-forecast-range {
@@ -981,27 +1091,6 @@
   margin-top: var(--lc-spacing-xs);
 }
 
-.lc-calc-info {
-  border-bottom: none !important;
-}
-
-.lc-calc-explanation {
-  font-size: var(--lc-font-size-xs);
-  color: var(--lc-text-secondary);
-  line-height: 1.5;
-}
-
-.lc-calc-explanation p {
-  margin: 0 0 var(--lc-spacing-sm) 0;
-}
-
-.lc-calc-explanation p:last-child {
-  margin-bottom: 0;
-}
-
-.lc-calc-explanation strong {
-  color: var(--lc-text-primary);
-}
 
 
 /* ============================================
@@ -1014,6 +1103,7 @@
   opacity: 1 !important;
   pointer-events: auto !important;
   cursor: pointer !important;
+  color: inherit !important;
 }
 
 #lucky-cat-header-button svg {
@@ -1023,7 +1113,7 @@
 }
 
 #lucky-cat-header-button:hover {
-  filter: brightness(1.1);
+  filter: brightness(1.2);
 }
 
 #lucky-cat-header-button.lc-button-active {
